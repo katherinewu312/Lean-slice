@@ -1,0 +1,30 @@
+name = "slice"
+version = "0.1.0"
+keywords = ["math"]
+defaultTargets = ["slice"]
+
+[leanOptions]
+pp.unicode.fun = true # pretty-prints `fun a ↦ b`
+
+[[require]]
+name = "mathlib"
+scope = "leanprover-community"
+rev = "v4.28.0"
+
+[[lean_lib]]
+name = "slice"
+
+[[lean_lib]]
+name = "Monad"
+
+[[lean_lib]]
+name = "Syntax"
+
+[[lean_lib]]
+name = "Skeleton"
+
+[[lean_lib]]
+name = "SmallStep"
+
+[[lean_lib]]
+name = "TypeSystem"

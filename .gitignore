@@ -1,0 +1,12 @@
+# Lake / Lean build artifacts
+.lake/
+.lean/
+build/
+
+# Lean generated files
+*.olean
+*.ilean
+*.trace
+
+# Editor / OS
+.DS_Store

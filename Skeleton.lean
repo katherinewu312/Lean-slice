@@ -1,0 +1,389 @@
+import Syntax
+
+namespace Slice
+
+open MeasureTheory ProbabilityTheory
+
+--- Expression skeletons
+--- A skeleton is syntactically identicak to Expr except that every const r is replaced by a hole. Formally, this is the paper's set Skel.
+inductive Skeleton : Type where
+  | hole : Skeleton
+  | var : String → Skeleton
+  | trueE : Skeleton
+  | falseE : Skeleton
+  | finconst : (n : ℕ) → Fin n → Skeleton
+  | discrete : DiscreteProbs → Skeleton
+  | lt : Skeleton → Skeleton → Skeleton
+  | ifE : Skeleton → Skeleton → Skeleton → Skeleton
+  | letE : String → Skeleton → Skeleton → Skeleton
+  | uniform : Skeleton → Skeleton → Skeleton
+  -- etc.
+
+--- Number of holes in a skeleton
+def numHoles : Skeleton → ℕ
+  | .hole => 1
+  | .var _ => 0
+  | .trueE => 0
+  | .falseE => 0
+  | .finconst _ _ => 0
+  | .discrete _ => 0
+  | .lt s1 s2 => numHoles s1 + numHoles s2
+  | .ifE s1 s2 s3 => numHoles s1 + (numHoles s2 + numHoles s3)
+  | .letE _ s1 s2 => numHoles s1 + numHoles s2
+  | .uniform s1 s2 => numHoles s1 + numHoles s2
+
+-- Fills skeleton s with hole assignment v, reading holes left-to-right, producing an expression
+def fillSkeleton : (s : Skeleton) → (Fin (numHoles s) → ℝ) → Expr
+  | .hole, v =>
+      .const (v ⟨0, by simp [numHoles]⟩)
+  | .var x, _ =>
+      .var x
+  | .trueE, _ =>
+      .trueE
+  | .falseE, _ =>
+      .falseE
+  | .finconst n k, _ =>
+      .finconst n k
+  | .discrete ps, _ =>
+      .discrete ps
+  | .lt s1 s2, v =>
+      let v1 : Fin (numHoles s1) → ℝ := fun i => v (Fin.castAdd (numHoles s2) i)
+      let v2 : Fin (numHoles s2) → ℝ := fun i => v (Fin.natAdd (numHoles s1) i)
+      .lt (fillSkeleton s1 v1) (fillSkeleton s2 v2)
+  | .ifE s1 s2 s3, v =>
+      let v1 : Fin (numHoles s1) → ℝ := fun i => v (Fin.castAdd (numHoles s2 + numHoles s3) i)
+      let v23 : Fin (numHoles s2 + numHoles s3) → ℝ := fun i => v (Fin.natAdd (numHoles s1) i)
+      let v2 : Fin (numHoles s2) → ℝ := fun i => v23 (Fin.castAdd (numHoles s3) i)
+      let v3 : Fin (numHoles s3) → ℝ := fun i => v23 (Fin.natAdd (numHoles s2) i)
+      .ifE (fillSkeleton s1 v1) (fillSkeleton s2 v2) (fillSkeleton s3 v3)
+  | .letE x s1 s2, v =>
+      let v1 : Fin (numHoles s1) → ℝ := fun i => v (Fin.castAdd (numHoles s2) i)
+      let v2 : Fin (numHoles s2) → ℝ := fun i => v (Fin.natAdd (numHoles s1) i)
+      .letE x (fillSkeleton s1 v1) (fillSkeleton s2 v2)
+  | .uniform s1 s2, v =>
+      let v1 : Fin (numHoles s1) → ℝ := fun i => v (Fin.castAdd (numHoles s2) i)
+      let v2 : Fin (numHoles s2) → ℝ := fun i => v (Fin.natAdd (numHoles s1) i)
+      .uniform (fillSkeleton s1 v1) (fillSkeleton s2 v2)
+
+
+--- Decomposing an expression ---
+
+-- Extract the skeleton of an expression.
+def skeletonOf : Expr → Skeleton
+  | .var x           => .var x
+  | .const _         => .hole
+  | .trueE           => .trueE
+  | .falseE          => .falseE
+  | .finconst n k    => .finconst n k
+  | .discrete ps     => .discrete ps
+  | .lt   e₁ e₂     => .lt   (skeletonOf e₁) (skeletonOf e₂)
+  | .ifE  e₁ e₂ e₃  => .ifE  (skeletonOf e₁) (skeletonOf e₂) (skeletonOf e₃)
+  | .letE x e₁ e₂  => .letE x (skeletonOf e₁) (skeletonOf e₂)
+  | .uniform e₁ e₂  => .uniform (skeletonOf e₁) (skeletonOf e₂)
+
+-- Extract real constants from e in left-to-right order, accumulating into a list.
+def holeValuesList : Expr → List ℝ
+  | .var _ => []
+  | .const r => [r]
+  | .trueE => []
+  | .falseE => []
+  | .finconst _ _ => []
+  | .discrete _ => []
+  | .lt e1 e2 => holeValuesList e1 ++ holeValuesList e2
+  | .ifE e1 e2 e3 => holeValuesList e1 ++ holeValuesList e2 ++ holeValuesList e3
+  | .letE _ e1 e2 => holeValuesList e1 ++ holeValuesList e2
+  | .uniform e1 e2 => holeValuesList e1 ++ holeValuesList e2
+
+-- Length of holeValuesList equals numHoles of the skeleton.
+@[simp]
+theorem holeValuesList_length (e : Expr) :
+  (holeValuesList e).length = numHoles (skeletonOf e) := by
+  induction e with
+  | var _ => simp [holeValuesList, skeletonOf, numHoles]
+  | const _         => simp [holeValuesList, skeletonOf, numHoles]
+  | trueE           => simp [holeValuesList, skeletonOf, numHoles]
+  | falseE          => simp [holeValuesList, skeletonOf, numHoles]
+  | finconst _ _    => simp [holeValuesList, skeletonOf, numHoles]
+  | discrete _      => simp [holeValuesList, skeletonOf, numHoles]
+  | lt e₁ e₂ ih₁ ih₂ =>
+      simp [holeValuesList, skeletonOf, numHoles, List.length_append, ih₁, ih₂]
+  | ifE e₁ e₂ e₃ ih₁ ih₂ ih₃ =>
+      simp [holeValuesList, skeletonOf, numHoles, List.length_append, ih₁, ih₂, ih₃]
+  | letE _ e₁ e₂ ih₁ ih₂ =>
+      simp [holeValuesList, skeletonOf, numHoles, List.length_append, ih₁, ih₂]
+  | uniform e₁ e₂ ih₁ ih₂ =>
+      simp [holeValuesList, skeletonOf, numHoles, List.length_append, ih₁, ih₂]
+
+
+-- The vector of real constants appearing in e, left-to-right. This is the second component of the decomposition function, dec₂.
+def holeValues : (e : Expr) → Fin (numHoles (skeletonOf e)) → ℝ
+  | .var _ =>
+      Fin.elim0
+  | .const r =>
+      fun _ => r
+  | .trueE =>
+      Fin.elim0
+  | .falseE =>
+      Fin.elim0
+  | .finconst _ _ =>
+      Fin.elim0
+  | .discrete _ =>
+      Fin.elim0
+  | .lt e₁ e₂ =>
+      by
+        simpa [skeletonOf, numHoles] using
+          (Fin.addCases (holeValues e₁) (holeValues e₂))
+  | .ifE e₁ e₂ e₃ =>
+      by
+        simpa [skeletonOf, numHoles, Nat.add_assoc] using
+          (Fin.addCases (holeValues e₁) (Fin.addCases (holeValues e₂) (holeValues e₃)))
+  | .letE _ e₁ e₂ =>
+      by
+        simpa [skeletonOf, numHoles] using
+          (Fin.addCases (holeValues e₁) (holeValues e₂))
+  | .uniform e₁ e₂ =>
+      by
+        simpa [skeletonOf, numHoles] using
+          (Fin.addCases (holeValues e₁) (holeValues e₂))
+
+
+-- The set of expressions whose skeleton is exactly s.
+def ExprOfSkel (s : Skeleton) : Type :=
+  {e : Expr // skeletonOf e = s}
+
+
+--- Show that every expression is uniquely determined by its hole-value vector
+
+-- Extracting then filling the expression recovers the original expression.
+--- Start from an Expr, decompose to (skeletonOf, holeValues), then rebuild. You recover the same Expr.
+theorem fillSkeleton_holeValues (e : Expr) :
+  fillSkeleton (skeletonOf e) (holeValues e) = e := by
+  induction e with
+  | var x =>
+      simp [fillSkeleton, skeletonOf, holeValues]
+  | const r =>
+      simp [fillSkeleton, skeletonOf, holeValues]
+  | trueE =>
+      simp [fillSkeleton, skeletonOf, holeValues]
+  | falseE =>
+      simp [fillSkeleton, skeletonOf, holeValues]
+  | finconst n k =>
+      simp [fillSkeleton, skeletonOf, holeValues]
+  | discrete ps =>
+      simp [fillSkeleton, skeletonOf, holeValues]
+  | lt e₁ e₂ ih₁ ih₂ =>
+      simp [fillSkeleton, skeletonOf, holeValues, ih₁, ih₂]
+  | ifE e₁ e₂ e₃ ih₁ ih₂ ih₃ =>
+      simp [fillSkeleton, skeletonOf, holeValues, ih₁, ih₂, ih₃]
+  | letE x e₁ e₂ ih₁ ih₂ =>
+      simp [fillSkeleton, skeletonOf, holeValues, ih₁, ih₂]
+  | uniform e₁ e₂ ih₁ ih₂ =>
+      simp [fillSkeleton, skeletonOf, holeValues, ih₁, ih₂]
+
+-- Filling then extracting the skeleton recovers the original skeleton.
+theorem skeletonOf_fillSkeleton (σ : Skeleton) (v : Fin (numHoles σ) → ℝ) :
+  skeletonOf (fillSkeleton σ v) = σ := by
+  induction σ with
+  | hole =>
+      simp [fillSkeleton, skeletonOf]
+  | var x =>
+      simp [fillSkeleton, skeletonOf]
+  | trueE =>
+      simp [fillSkeleton, skeletonOf]
+  | falseE =>
+      simp [fillSkeleton, skeletonOf]
+  | finconst n k =>
+      simp [fillSkeleton, skeletonOf]
+  | discrete ps =>
+      simp [fillSkeleton, skeletonOf]
+  | lt s₁ s₂ ih₁ ih₂ =>
+      simp [fillSkeleton, skeletonOf, ih₁, ih₂]
+  | ifE s₁ s₂ s₃ ih₁ ih₂ ih₃ =>
+      simp [fillSkeleton, skeletonOf, ih₁, ih₂, ih₃]
+  | letE x s₁ s₂ ih₁ ih₂ =>
+      simp [fillSkeleton, skeletonOf, ih₁, ih₂]
+  | uniform s₁ s₂ ih₁ ih₂ =>
+      simp [fillSkeleton, skeletonOf, ih₁, ih₂]
+
+lemma fillSkeleton_eq_rec {s t : Skeleton} (h : s = t) (v : Fin (numHoles s) → ℝ) :
+    fillSkeleton t (h ▸ v) = fillSkeleton s v := by
+  cases h
+  rfl
+
+
+-- For a fixed s, the map fillSkeleton is injective: so if two hole assignments produce the same filled expression, those assignments were equal.
+theorem fillSkeleton_injective (σ : Skeleton) :
+  Function.Injective (fillSkeleton σ) := by
+  intro v w h
+  induction σ with
+  | hole =>
+      have h0 : v ⟨0, by simp [numHoles]⟩ = w ⟨0, by simp [numHoles]⟩ := by
+        simpa [fillSkeleton, numHoles] using
+          congrArg (fun e => match e with | .const r => r | _ => 0) h
+      funext i
+      fin_cases i
+      simpa using h0
+  | var x =>
+      funext i
+      exact Fin.elim0 i
+  | trueE =>
+      funext i
+      exact Fin.elim0 i
+  | falseE =>
+      funext i
+      exact Fin.elim0 i
+  | finconst n k =>
+      funext i
+      exact Fin.elim0 i
+  | discrete ps =>
+      funext i
+      exact Fin.elim0 i
+  | lt s₁ s₂ ih₁ ih₂ =>
+      let v1 : Fin (numHoles s₁) → ℝ := fun i => v (Fin.castAdd (numHoles s₂) i)
+      let v2 : Fin (numHoles s₂) → ℝ := fun i => v (Fin.natAdd (numHoles s₁) i)
+      let w1 : Fin (numHoles s₁) → ℝ := fun i => w (Fin.castAdd (numHoles s₂) i)
+      let w2 : Fin (numHoles s₂) → ℝ := fun i => w (Fin.natAdd (numHoles s₁) i)
+      have h' : Expr.lt (fillSkeleton s₁ v1) (fillSkeleton s₂ v2) =
+          Expr.lt (fillSkeleton s₁ w1) (fillSkeleton s₂ w2) := by
+        simpa [fillSkeleton, v1, v2, w1, w2] using h
+      have h1 : fillSkeleton s₁ v1 = fillSkeleton s₁ w1 := by
+        injection h' with h1 h2
+      have h2 : fillSkeleton s₂ v2 = fillSkeleton s₂ w2 := by
+        injection h' with h1 h2
+      have hv1 : v1 = w1 := ih₁ h1
+      have hv2 : v2 = w2 := ih₂ h2
+      funext i
+      refine Fin.addCases ?_ ?_ i
+      · intro j
+        simpa [v1, w1] using congrFun hv1 j
+      · intro j
+        simpa [v2, w2] using congrFun hv2 j
+  | ifE s₁ s₂ s₃ ih₁ ih₂ ih₃ =>
+      let v1 : Fin (numHoles s₁) → ℝ := fun i => v (Fin.castAdd (numHoles s₂ + numHoles s₃) i)
+      let v23 : Fin (numHoles s₂ + numHoles s₃) → ℝ := fun i => v (Fin.natAdd (numHoles s₁) i)
+      let v2 : Fin (numHoles s₂) → ℝ := fun i => v23 (Fin.castAdd (numHoles s₃) i)
+      let v3 : Fin (numHoles s₃) → ℝ := fun i => v23 (Fin.natAdd (numHoles s₂) i)
+      let w1 : Fin (numHoles s₁) → ℝ := fun i => w (Fin.castAdd (numHoles s₂ + numHoles s₃) i)
+      let w23 : Fin (numHoles s₂ + numHoles s₃) → ℝ := fun i => w (Fin.natAdd (numHoles s₁) i)
+      let w2 : Fin (numHoles s₂) → ℝ := fun i => w23 (Fin.castAdd (numHoles s₃) i)
+      let w3 : Fin (numHoles s₃) → ℝ := fun i => w23 (Fin.natAdd (numHoles s₂) i)
+      have h' : Expr.ifE (fillSkeleton s₁ v1) (fillSkeleton s₂ v2) (fillSkeleton s₃ v3) =
+          Expr.ifE (fillSkeleton s₁ w1) (fillSkeleton s₂ w2) (fillSkeleton s₃ w3) := by
+        simpa [fillSkeleton, v1, v23, v2, v3, w1, w23, w2, w3] using h
+      have h1 : fillSkeleton s₁ v1 = fillSkeleton s₁ w1 := by
+        injection h' with h1 h2 h3
+      have h2 : fillSkeleton s₂ v2 = fillSkeleton s₂ w2 := by
+        injection h' with h1 h2 h3
+      have h3 : fillSkeleton s₃ v3 = fillSkeleton s₃ w3 := by
+        injection h' with h1 h2 h3
+      have hv1 : v1 = w1 := ih₁ h1
+      have hv2 : v2 = w2 := ih₂ h2
+      have hv3 : v3 = w3 := ih₃ h3
+      funext i
+      refine Fin.addCases ?_ ?_ i
+      · intro j
+        simpa [v1, w1] using congrFun hv1 j
+      · intro j
+        refine Fin.addCases ?_ ?_ j
+        · intro k
+          simpa [v23, v2, w23, w2] using congrFun hv2 k
+        · intro k
+          simpa [v23, v3, w23, w3] using congrFun hv3 k
+  | letE x s₁ s₂ ih₁ ih₂ =>
+      let v1 : Fin (numHoles s₁) → ℝ := fun i => v (Fin.castAdd (numHoles s₂) i)
+      let v2 : Fin (numHoles s₂) → ℝ := fun i => v (Fin.natAdd (numHoles s₁) i)
+      let w1 : Fin (numHoles s₁) → ℝ := fun i => w (Fin.castAdd (numHoles s₂) i)
+      let w2 : Fin (numHoles s₂) → ℝ := fun i => w (Fin.natAdd (numHoles s₁) i)
+      have h' : Expr.letE x (fillSkeleton s₁ v1) (fillSkeleton s₂ v2) =
+          Expr.letE x (fillSkeleton s₁ w1) (fillSkeleton s₂ w2) := by
+        simpa [fillSkeleton, v1, v2, w1, w2] using h
+      have h1 : fillSkeleton s₁ v1 = fillSkeleton s₁ w1 := by
+        injection h' with h1 h2
+      have h2 : fillSkeleton s₂ v2 = fillSkeleton s₂ w2 := by
+        injection h' with h1 h2
+      have hv1 : v1 = w1 := ih₁ h1
+      have hv2 : v2 = w2 := ih₂ h2
+      funext i
+      refine Fin.addCases ?_ ?_ i
+      · intro j
+        simpa [v1, w1] using congrFun hv1 j
+      · intro j
+        simpa [v2, w2] using congrFun hv2 j
+  | uniform s₁ s₂ ih₁ ih₂ =>
+      let v1 : Fin (numHoles s₁) → ℝ := fun i => v (Fin.castAdd (numHoles s₂) i)
+      let v2 : Fin (numHoles s₂) → ℝ := fun i => v (Fin.natAdd (numHoles s₁) i)
+      let w1 : Fin (numHoles s₁) → ℝ := fun i => w (Fin.castAdd (numHoles s₂) i)
+      let w2 : Fin (numHoles s₂) → ℝ := fun i => w (Fin.natAdd (numHoles s₁) i)
+      have h' : Expr.uniform (fillSkeleton s₁ v1) (fillSkeleton s₂ v2) =
+          Expr.uniform (fillSkeleton s₁ w1) (fillSkeleton s₂ w2) := by
+        simpa [fillSkeleton, v1, v2, w1, w2] using h
+      have h1 : fillSkeleton s₁ v1 = fillSkeleton s₁ w1 := by
+        injection h' with h1 h2
+      have h2 : fillSkeleton s₂ v2 = fillSkeleton s₂ w2 := by
+        injection h' with h1 h2
+      have hv1 : v1 = w1 := ih₁ h1
+      have hv2 : v2 = w2 := ih₂ h2
+      funext i
+      refine Fin.addCases ?_ ?_ i
+      · intro j
+        simpa [v1, w1] using congrFun hv1 j
+      · intro j
+        simpa [v2, w2] using congrFun hv2 j
+
+-- If you fill a skeleton and then extract hole values, you get back the original hole assignment.
+theorem holeValues_fillSkeleton (σ : Skeleton) (v : Fin (numHoles σ) → ℝ) :
+  (skeletonOf_fillSkeleton σ v) ▸ holeValues (fillSkeleton σ v) = v := by
+  have hs : skeletonOf (fillSkeleton σ v) = σ := skeletonOf_fillSkeleton σ v
+  have hfill :
+      fillSkeleton σ (hs ▸ holeValues (fillSkeleton σ v)) =
+        fillSkeleton σ v := by
+    calc
+      fillSkeleton σ (hs ▸ holeValues (fillSkeleton σ v)) =
+          fillSkeleton (skeletonOf (fillSkeleton σ v)) (holeValues (fillSkeleton σ v)) := by
+            simpa using fillSkeleton_eq_rec hs (holeValues (fillSkeleton σ v))
+      _ = fillSkeleton σ v := fillSkeleton_holeValues (fillSkeleton σ v)
+  simpa [hs] using fillSkeleton_injective σ hfill
+
+
+-- Bijection: ExprOfSkel s <-> (Fin (numHoles s) → ℝ)
+noncomputable def exprOfSkel_equiv (σ : Skeleton) :
+    ExprOfSkel σ ≃ (Fin (numHoles σ) → ℝ) where
+  toFun  := fun ⟨e, he⟩ => he ▸ holeValues e
+  invFun := fun v => ⟨fillSkeleton σ v, skeletonOf_fillSkeleton σ v⟩
+  left_inv := by
+    intro x
+    rcases x with ⟨e, rfl⟩
+    apply Subtype.ext
+    simpa using fillSkeleton_holeValues e
+  right_inv := by
+    intro v
+    simpa using holeValues_fillSkeleton σ v
+
+-- Transport the Borel sigma-algebra on Fin (numHoles s) → ℝ along the bijection exprOfSkel_equiv s, to obtain exprOfSkel measurable
+noncomputable instance exprOfSkel_measurableSpace (σ : Skeleton) :
+    MeasurableSpace (ExprOfSkel σ) :=
+  MeasurableSpace.comap (exprOfSkel_equiv σ) inferInstance
+
+-- Take disjoint union of exprOfSkel to obtain Expr measurable.
+instance expr_measurableSpace : MeasurableSpace Expr where
+  MeasurableSet' S :=
+    ∀ σ : Skeleton, MeasurableSet (α := ExprOfSkel σ)
+      { p : ExprOfSkel σ | p.1 ∈ S }
+  measurableSet_empty := by
+    intro σ
+    simp
+  measurableSet_compl := by
+    intro S hS σ
+    have hSσ := hS σ
+    -- {p | p.1 ∈ Sᶜ} = ({p | p.1 ∈ S})ᶜ  in ExprOfSkel σ
+    convert MeasurableSet.compl hSσ using 1
+  measurableSet_iUnion := by
+    intro f hf σ
+    have : { p : ExprOfSkel σ | p.1 ∈ ⋃ i, f i } =
+           ⋃ i, { p : ExprOfSkel σ | p.1 ∈ f i } := by
+      ext ⟨e, he⟩; simp [Set.mem_iUnion]
+    rw [this]
+    exact MeasurableSet.iUnion (fun i => hf i σ)
+
+
+end Slice
