@@ -1,4 +1,5 @@
 import Syntax
+import TypeSystem
 
 namespace Slice
 
@@ -385,5 +386,10 @@ instance expr_measurableSpace : MeasurableSpace Expr where
     rw [this]
     exact MeasurableSet.iUnion (fun i => hf i σ)
 
+/-- Subspace measurable structure on well-typed expressions of type τ,
+    inherited from the disjoint-union structure on all Expr. -/
+noncomputable instance exprOfType_measurableSpace (τ : Ty) :
+    MeasurableSpace (ExprsOfType τ) :=
+  MeasurableSpace.comap (fun ⟨e, _⟩ => e) expr_measurableSpace
 
 end Slice

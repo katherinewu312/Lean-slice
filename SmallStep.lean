@@ -8,6 +8,11 @@ namespace Slice
 
 open MeasureTheory ProbabilityTheory
 
+/-- A measure is subprobability if its total mass is at most `1`.
+Since μ is already a Measure, countable additivity and nonnegativity are already built in. -/
+def IsSubProbabilityMeasure {α : Type*} [MeasurableSpace α] (μ : Measure α) : Prop :=
+  μ Set.univ ≤ 1
+
 -- ---------------------------------------------------------------------------
 -- Small-step semantics: Expr → Dist (Expr)
 -- Each expression steps to a distribution over expressions.
@@ -21,131 +26,105 @@ noncomputable def discreteMeasureExprFrom (i : Nat) : List Prob → Dist Expr
 
 def diverge : Dist Expr := 0
 
-noncomputable def step : Expr → Dist Expr
-  | .const _ =>
-      diverge
+noncomputable def step (τ : Ty) : ExprsOfType τ → Dist (ExprsOfType τ)
 
-  | .finconst _ _ =>
-      diverge
+  -- Values diverge
+  | ⟨.const _, _⟩    => 0
+  | ⟨.trueE, _⟩      => 0
+  | ⟨.falseE, _⟩     => 0
+  | ⟨.finconst _ _, _⟩ => 0
+  | ⟨.var _, _⟩      => 0
 
-  | .trueE =>
-      diverge
+  -- discrete: sorry for now
+  | ⟨.discrete _, _⟩ => 0
 
-  | .falseE =>
-      diverge
-
-  | .var _ =>
-      diverge
-
-  | .discrete ps =>
-      discreteMeasureExprFrom 0 ps.1
-
-  -- If e1 is a value v, substitute and return δ_{e2[v/x]}
-  -- Otherwise, step e1 and wrap: ⟦e1⟧ >>= λg. δ_{let x=g in e2}
-  | .letE x e1 e2 =>
-      if isValue e1 then
-        Dist.ret (subst x e1 e2)
-      else
-        Dist.bind (step e1) (fun g => Dist.ret (.letE x g e2))
-
-  -- If e1 = const 1 (true), return δ_{e2}
-  -- If e1 = const 0 (false), return δ_{e3}
-  -- Otherwise, step e1 and wrap: ⟦e1⟧ >>= λg. δ_{if g then e2 else e3}
-  | .ifE e1 e2 e3 =>
-      match e1 with
-      | .trueE =>
-          Dist.ret e2
-      | .falseE =>
-          Dist.ret e3
-      | _ =>
-          Dist.bind (step e1) (fun g => Dist.ret (.ifE g e2 e3))
-
-  -- Both values v1, v2: return δ_{true} or δ_{false}
-  -- e1 value, e2 not: step e2 and wrap
-  -- e1 not value: step e1 and wrap
-  | .lt e1 e2 =>
-      match e1, e2 with
-      | .const v1, .const v2 =>
-          if v1 < v2 then Dist.ret .trueE
-          else Dist.ret .falseE
-      | .const v1, _ =>
-          Dist.bind (step e2) (fun g => Dist.ret (.lt (.const v1) g))
-      | _, _ =>
-          Dist.bind (step e1) (fun g => Dist.ret (.lt g e2))
-
-  -- Both values v1, v2:
-  --   if v1 < v2: use conditionalized volume on [v1, v2], then return a constant expression
-  --   otherwise: return a deterministic value
-  -- e1 value, e2 not: step e2 and wrap
-  -- e1 not value: step e1 and wrap
-  | .uniform e1 e2 =>
-      match e1, e2 with
-      | .const v1, .const v2 =>
-          if v1 <= v2 then
-            let uniformMeasure : Dist ℝ :=
-              ProbabilityTheory.cond MeasureTheory.volume (Set.Icc v1 v2)
-            Dist.bind uniformMeasure (fun _ => Dist.ret (.const v1))
+  -- let x = e1 in e2
+  | ⟨.letE x e1 e2, h⟩ =>
+      by
+        classical
+        let hLet : ∃ τ1, HasType Ctx.empty e1 τ1 ∧ HasType (Ctx.extend Ctx.empty x τ1) e2 τ :=
+          hasType_letE_inv h
+        let τ1 : Ty := Classical.choose hLet
+        let h1 : HasType Ctx.empty e1 τ1 := (Classical.choose_spec hLet).1
+        let h2 : HasType (Ctx.extend Ctx.empty x τ1) e2 τ := (Classical.choose_spec hLet).2
+        exact
+          if isValue e1 then
+            Dist.ret ⟨subst x e1 e2, subst_preserves_type h1 h2⟩
           else
-            diverge
-      | .const v1, _ =>
-          Dist.bind (step e2) (fun g => Dist.ret (.uniform (.const v1) g))
-      | _, _ =>
-          Dist.bind (step e1) (fun g => Dist.ret (.uniform g e2))
+            Dist.bind
+              (step τ1 ⟨e1, h1⟩)
+              (fun ⟨g, hg⟩ => Dist.ret ⟨.letE x g e2, HasType.letE hg h2⟩)
+
+  -- if e1 then e2 else e3
+  | ⟨.ifE e1 e2 e3, h⟩ =>
+      let hc : HasType Ctx.empty e1 .bool := (hasType_ifE_inv h).1
+      let ht : HasType Ctx.empty e2 τ := (hasType_ifE_inv h).2.1
+      let hf : HasType Ctx.empty e3 τ := (hasType_ifE_inv h).2.2
+      match e1 with
+      | .trueE  => Dist.ret ⟨e2, ht⟩
+      | .falseE => Dist.ret ⟨e3, hf⟩
+      | _       =>
+          -- e1 is not a boolean value; step e1 and rebuild
+          Dist.bind
+            (step .bool ⟨e1, hc⟩)
+            (fun ⟨g, hg⟩ => Dist.ret ⟨.ifE g e2 e3, HasType.ifE hg ht hf⟩)
+
+  -- e1 < e2
+  | ⟨.lt e1 e2, h⟩ =>
+      let hInv : τ = .bool ∧ HasType Ctx.empty e1 .real ∧ HasType Ctx.empty e2 .real :=
+        hasType_lt_inv h
+      let hBool : τ = .bool := hInv.1
+      let h1 : HasType Ctx.empty e1 .real := hInv.2.1
+      let h2 : HasType Ctx.empty e2 .real := hInv.2.2
+      hBool ▸
+      match e1 with
+      | .const v1 =>
+          match e2 with
+          | .const v2 =>
+              if v1 < v2 then Dist.ret ⟨.trueE, HasType.trueE⟩
+              else            Dist.ret ⟨.falseE, HasType.falseE⟩
+          | _ =>
+              Dist.bind
+                (step .real ⟨e2, h2⟩)
+                (fun ⟨g, hg⟩ => Dist.ret ⟨.lt (.const v1) g, HasType.lt HasType.const hg⟩)
+      | _ =>
+          Dist.bind
+            (step .real ⟨e1, h1⟩)
+            (fun ⟨g, hg⟩ => Dist.ret ⟨.lt g e2, HasType.lt hg h2⟩)
+
+  -- uniform e1 e2: sorry for now
+  | ⟨.uniform _ _, _⟩ => 0
+
+termination_by e => sizeOf e.1
+
 
 -- ---------------------------------------------------------------------------
 -- Small-step semantics is a Markov kernel.
--- 1. Probability measure
+-- 1. Subprobability measure
 -- 2. Measurable function
 -- ---------------------------------------------------------------------------
 
--- Dirac.ret e is a probability measure.
--- Proof: Dist.ret = Measure.dirac, and Mathlib registers this as an instance.
-lemma ret_is_prob_measure (e : Expr) : IsProbabilityMeasure (Dist.ret e) :=
-  Measure.dirac.isProbabilityMeasure
+-- ---------------------------------------------------------------------------
+-- 1. Subprobability measure
+-- ---------------------------------------------------------------------------
 
--- Bind preserves probability measures.
--- If μ is a probability measure and every k x is a probability measure (with k measurable), then μ >>= k is a probability measure.
-lemma bind_is_prob_measure {α β : Type} [MeasurableSpace α] [MeasurableSpace β]
+-- Dirac.ret e is a subprobability measure.
+lemma ret_is_subprob_measure (e : Expr) : IsSubProbabilityMeasure (Dist.ret e) := by
+  unfold IsSubProbabilityMeasure
+  simp [Dist.ret_is_dirac]
+
+-- Bind preserves subprobability measures.
+lemma bind_is_subprob_measure {α β : Type} [MeasurableSpace α] [MeasurableSpace β]
     (μ : Measure α) (k : α → Measure β)
-    (hμ : IsProbabilityMeasure μ)
-    (hk : ∀ x, IsProbabilityMeasure (k x))
+    (hμ : IsSubProbabilityMeasure μ)
+    (hk : ∀ x, IsSubProbabilityMeasure (k x))
     (hkm : Measurable k) :
-    IsProbabilityMeasure (μ >>= k) := by
-  constructor
+    IsSubProbabilityMeasure (μ >>= k) := by
+  unfold IsSubProbabilityMeasure at hμ hk ⊢
   rw [Dist.bind_is_measure_bind, Measure.bind_apply MeasurableSet.univ hkm.aemeasurable]
-  simp only [measure_univ, lintegral_const, mul_one]
+  exact (lintegral_mono (fun a => hk a)).trans (by simp [hμ])
 
--- Dist.ret ∘ f is measurable.
-lemma ret_comp_measurable {α : Type*} [MeasurableSpace α] {f : α → Expr} (hf : Measurable f) :
-    Measurable (fun e : α => Dist.ret (f e)) := by
-  simpa [Dist.ret_is_dirac] using
-    (MeasureTheory.Measure.measurable_dirac.comp hf)
-
-
--- Substitution is measurable
-lemma subst_is_measurable (x : String) (body : Expr) :
-    Measurable (fun e : Expr => Dist.ret (subst x e body)) := by sorry
-
--- Bind preserves measurability.
-lemma bind_is_measurable {α β γ : Type*}
-    [MeasurableSpace α] [MeasurableSpace β] [MeasurableSpace γ]
-    {f : α → Measure β} {k : β → Measure γ}
-    (hf : Measurable f) (hk : Measurable k) :
-    Measurable (fun x => (f x).bind k) := by
-  exact (MeasureTheory.Measure.measurable_bind' hk).comp hf
-
-/-
-For now, assume the temporary version of `step` where the two postponed branches are:
-
-  | .discrete ps =>
-      Dist.ret (.discrete ps)
-
-  | .uniform e1 e2 =>
-      Dist.ret (.uniform e1 e2)
-
-Everything below is for that temporary fragment.
--/
-
+-- For μ >>= f, f is measurable.
 lemma let_measurable (x : String) (e2 : Expr) :
     Measurable (fun g : Expr => Dist.ret (Expr.letE x g e2)) := by
   sorry
@@ -170,34 +149,42 @@ lemma uniform_right_measurable (v1 : ℝ) :
     Measurable (fun g : Expr => Dist.ret (Expr.uniform (.const v1) g)) := by
   sorry
 
--- Add types
-lemma step_is_prob_measure (e : Expr) (ht : WellTyped e) :
-    isValue e ∨ IsProbabilityMeasure (step e) := by sorry
+lemma step_is_subprob_measure (τ : Ty) (e : ExprsOfType τ) :
+    IsSubProbabilityMeasure (step τ e) := by sorry
+
+-- ---------------------------------------------------------------------------
+-- 2. Measurability
+-- ---------------------------------------------------------------------------
+-- Dist.ret ∘ f is measurable.
+lemma ret_comp_measurable {α : Type*} [MeasurableSpace α] {f : α → Expr} (hf : Measurable f) :
+    Measurable (fun e : α => Dist.ret (f e)) := by
+  simpa [Dist.ret_is_dirac] using
+    (MeasureTheory.Measure.measurable_dirac.comp hf)
+
+
+-- Substitution is measurable
+lemma subst_is_measurable (x : String) (body : Expr) :
+    Measurable (fun e : Expr => Dist.ret (subst x e body)) := by sorry
+
+-- Bind preserves measurability.
+lemma bind_is_measurable {α β γ : Type*}
+    [MeasurableSpace α] [MeasurableSpace β] [MeasurableSpace γ]
+    {f : α → Measure β} {k : β → Measure γ}
+    (hf : Measurable f) (hk : Measurable k) :
+    Measurable (fun x => (f x).bind k) := by
+  exact (MeasureTheory.Measure.measurable_bind' hk).comp hf
 
 /-- Step is measurable -/
-lemma step_is_measurable : Measurable step := by
-  -- `ret_const_measurable` handles branches where `step` is a fixed Dirac map.
-  -- The remaining branches can be handled by structural analysis for fixed `s`.
-  -- `Measurable step` is equivalent to measurability of all evaluation maps
-  -- `e ↦ step e s`.
-  rw [MeasureTheory.Measure.measurable_measure]
-  intro s hs
-  -- This avoids the incorrect `intro e; induction e` shape
-  -- (`Measurable step` does not introduce an `Expr` variable first).
-  --
-  -- TODO: finish this proof by structural analysis of `step` for fixed `s`.
-  -- (left as sorry for now; the induction error is resolved)
+lemma step_is_measurable (τ : Ty) : Measurable (step τ) := by
   sorry
 
-/-- Package `step` as a kernel once measurability is known. -/
-noncomputable def stepKernel : Kernel Expr Expr where
-  toFun := step
-  measurable' := step_is_measurable
+noncomputable def stepKernel (τ : Ty) : Kernel (ExprsOfType τ) (ExprsOfType τ) where
+  toFun    := step τ
+  measurable' := step_is_measurable τ
 
-/-- Final result: the temporary small-step semantics is a Markov kernel. -/
-theorem step_is_Markov_kernel : IsMarkovKernel stepKernel := by
-  constructor
-  intro e
-  exact step_is_prob_measure e
+/-- For typed inputs, `stepKernel` is subprobability. -/
+theorem stepKernel_subprob_on_welltyped (τ : Ty) (e : ExprsOfType τ) :
+    IsSubProbabilityMeasure (stepKernel τ e) := by
+  simpa [stepKernel] using step_is_subprob_measure τ e
 
 end Slice
