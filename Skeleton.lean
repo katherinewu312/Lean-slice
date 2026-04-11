@@ -5,6 +5,8 @@ namespace Slice
 
 open MeasureTheory ProbabilityTheory
 
+namespace Untyped
+
 --- Expression skeletons
 --- A skeleton is syntactically identicak to Expr except that every const r is replaced by a hole. Formally, this is the paper's set Skel.
 inductive Skeleton : Type where
@@ -391,5 +393,228 @@ instance expr_measurableSpace : MeasurableSpace Expr where
 noncomputable instance exprOfType_measurableSpace (τ : Ty) :
     MeasurableSpace (ExprsOfType τ) :=
   MeasurableSpace.comap (fun ⟨e, _⟩ => e) expr_measurableSpace
+
+end Untyped
+
+/-- Skeleton typing: identical to `HasType` on expressions, except holes stand for real constants. -/
+inductive HasTypeSkel : Ctx → Untyped.Skeleton → Ty → Prop where
+  | hole {Γ : Ctx} :
+      HasTypeSkel Γ .hole .real
+
+  | var {Γ : Ctx} {x : String} {τ : Ty} :
+      Γ x = some τ →
+      HasTypeSkel Γ (.var x) τ
+
+  | trueE {Γ : Ctx} :
+      HasTypeSkel Γ .trueE .bool
+
+  | falseE {Γ : Ctx} :
+      HasTypeSkel Γ .falseE .bool
+
+  | finconst {Γ : Ctx} {n : Nat} (k : Fin n) :
+      HasTypeSkel Γ (.finconst n k) (.fin n)
+
+  | discrete {Γ : Ctx} {ps : DiscreteProbs} :
+      HasTypeSkel Γ (.discrete ps) (.fin ps.1.length)
+
+  | letE {Γ : Ctx} {x : String} {s1 s2 : Untyped.Skeleton} {τ1 τ2 : Ty} :
+      HasTypeSkel Γ s1 τ1 →
+      HasTypeSkel (Ctx.extend Γ x τ1) s2 τ2 →
+      HasTypeSkel Γ (.letE x s1 s2) τ2
+
+  | lt {Γ : Ctx} {s1 s2 : Untyped.Skeleton} :
+      HasTypeSkel Γ s1 .real →
+      HasTypeSkel Γ s2 .real →
+      HasTypeSkel Γ (.lt s1 s2) .bool
+
+  | ifE {Γ : Ctx} {c t f : Untyped.Skeleton} {τ : Ty} :
+      HasTypeSkel Γ c .bool →
+      HasTypeSkel Γ t τ →
+      HasTypeSkel Γ f τ →
+      HasTypeSkel Γ (.ifE c t f) τ
+
+  | uniform {Γ : Ctx} {s1 s2 : Untyped.Skeleton} :
+      HasTypeSkel Γ s1 .real →
+      HasTypeSkel Γ s2 .real →
+      HasTypeSkel Γ (.uniform s1 s2) .real
+
+/-- Well-typed skeletons of type `τ` in the empty context. -/
+def SkeletonsOfType (τ : Ty) : Type :=
+  {s : Untyped.Skeleton // HasTypeSkel Ctx.empty s τ}
+
+lemma hasTypeSkel_of_hasType {Γ : Ctx} {e : Expr} {τ : Ty}
+    (h : HasType Γ e τ) :
+    HasTypeSkel Γ (Untyped.skeletonOf e) τ := by
+  induction h with
+  | var hx =>
+      exact HasTypeSkel.var hx
+  | const =>
+      exact HasTypeSkel.hole
+  | trueE =>
+      exact HasTypeSkel.trueE
+  | falseE =>
+      exact HasTypeSkel.falseE
+  | finconst k =>
+      exact HasTypeSkel.finconst k
+  | discrete =>
+      exact HasTypeSkel.discrete
+  | letE h1 h2 ih1 ih2 =>
+      simpa [Untyped.skeletonOf] using HasTypeSkel.letE ih1 ih2
+  | lt h1 h2 ih1 ih2 =>
+      simpa [Untyped.skeletonOf] using HasTypeSkel.lt ih1 ih2
+  | ifE hc ht hf ihc iht ihf =>
+      simpa [Untyped.skeletonOf] using HasTypeSkel.ifE ihc iht ihf
+  | uniform h1 h2 ih1 ih2 =>
+      simpa [Untyped.skeletonOf] using HasTypeSkel.uniform ih1 ih2
+
+lemma fillSkeleton_preserves_type {Γ : Ctx} {s : Untyped.Skeleton} {τ : Ty}
+    (hs : HasTypeSkel Γ s τ) :
+    ∀ v : Fin (Untyped.numHoles s) → ℝ, HasType Γ (Untyped.fillSkeleton s v) τ := by
+  induction hs with
+  | hole =>
+      intro v
+      simpa [Untyped.fillSkeleton, Untyped.numHoles] using
+        (HasType.const (r := v ⟨0, by simp [Untyped.numHoles]⟩))
+  | var hx =>
+      intro v
+      simpa [Untyped.fillSkeleton] using (HasType.var hx)
+  | trueE =>
+      intro v
+      simpa [Untyped.fillSkeleton] using (HasType.trueE)
+  | falseE =>
+      intro v
+      simpa [Untyped.fillSkeleton] using (HasType.falseE)
+  | finconst k =>
+      intro v
+      simpa [Untyped.fillSkeleton] using (HasType.finconst k)
+  | discrete =>
+      intro v
+      simpa [Untyped.fillSkeleton] using (HasType.discrete)
+  | letE hs1 hs2 ih1 ih2 =>
+      intro v
+      simpa [Untyped.fillSkeleton] using
+        (HasType.letE
+          (ih1 (fun i => v (Fin.castAdd _ i)))
+          (ih2 (fun i => v (Fin.natAdd _ i))))
+  | lt hs1 hs2 ih1 ih2 =>
+      intro v
+      simpa [Untyped.fillSkeleton] using
+        (HasType.lt
+          (ih1 (fun i => v (Fin.castAdd _ i)))
+          (ih2 (fun i => v (Fin.natAdd _ i))))
+  | ifE hc ht hf ihc iht ihf =>
+      intro v
+      simpa [Untyped.fillSkeleton] using
+        (HasType.ifE
+          (ihc (fun i => v (Fin.castAdd _ i)))
+          (iht (fun i => v (Fin.natAdd _ (Fin.castAdd _ i))))
+          (ihf (fun i => v (Fin.natAdd _ (Fin.natAdd _ i)))))
+  | uniform hs1 hs2 ih1 ih2 =>
+      intro v
+      simpa [Untyped.fillSkeleton] using
+        (HasType.uniform
+          (ih1 (fun i => v (Fin.castAdd _ i)))
+          (ih2 (fun i => v (Fin.natAdd _ i))))
+
+-- Typed API
+
+def numHoles {τ : Ty} (s : SkeletonsOfType τ) : ℕ :=
+  Untyped.numHoles s.1
+
+def fillSkeleton {τ : Ty} (s : SkeletonsOfType τ) :
+    (Fin (numHoles s) → ℝ) → ExprsOfType τ
+  | v => ⟨Untyped.fillSkeleton s.1 v, fillSkeleton_preserves_type s.2 v⟩
+
+def skeletonOf {τ : Ty} (e : ExprsOfType τ) : SkeletonsOfType τ :=
+  ⟨Untyped.skeletonOf e.1, hasTypeSkel_of_hasType e.2⟩
+
+def holeValuesList {τ : Ty} (e : ExprsOfType τ) : List ℝ :=
+  Untyped.holeValuesList e.1
+
+@[simp]
+theorem holeValuesList_length {τ : Ty} (e : ExprsOfType τ) :
+  (holeValuesList e).length = numHoles (skeletonOf e) := by
+  simp [holeValuesList, numHoles, skeletonOf, Untyped.holeValuesList_length]
+
+def holeValues {τ : Ty} (e : ExprsOfType τ) : Fin (numHoles (skeletonOf e)) → ℝ := by
+  simpa [numHoles, skeletonOf] using (Untyped.holeValues e.1)
+
+def ExprOfSkel {τ : Ty} (s : SkeletonsOfType τ) : Type :=
+  {e : ExprsOfType τ // skeletonOf e = s}
+
+theorem fillSkeleton_holeValues {τ : Ty} (e : ExprsOfType τ) :
+  fillSkeleton (skeletonOf e) (holeValues e) = e := by
+  apply Subtype.ext
+  simpa [fillSkeleton, skeletonOf, holeValues, numHoles] using
+    Untyped.fillSkeleton_holeValues e.1
+
+theorem skeletonOf_fillSkeleton {τ : Ty} (σ : SkeletonsOfType τ) (v : Fin (numHoles σ) → ℝ) :
+  skeletonOf (fillSkeleton σ v) = σ := by
+  apply Subtype.ext
+  simpa [fillSkeleton, skeletonOf, numHoles] using
+    Untyped.skeletonOf_fillSkeleton σ.1 v
+
+lemma fillSkeleton_eq_rec {τ : Ty} {s t : SkeletonsOfType τ}
+    (h : s = t) (v : Fin (numHoles s) → ℝ) :
+    fillSkeleton t (h ▸ v) = fillSkeleton s v := by
+  cases h
+  rfl
+
+theorem fillSkeleton_injective {τ : Ty} (σ : SkeletonsOfType τ) :
+  Function.Injective (fillSkeleton σ) := by
+  intro v w h
+  apply Untyped.fillSkeleton_injective σ.1
+  exact congrArg Subtype.val h
+
+theorem holeValues_fillSkeleton {τ : Ty} (σ : SkeletonsOfType τ) (v : Fin (numHoles σ) → ℝ) :
+  (skeletonOf_fillSkeleton σ v) ▸ holeValues (fillSkeleton σ v) = v := by
+  have hs : skeletonOf (fillSkeleton σ v) = σ := skeletonOf_fillSkeleton σ v
+  have hfill :
+      fillSkeleton σ (hs ▸ holeValues (fillSkeleton σ v)) =
+        fillSkeleton σ v := by
+    calc
+      fillSkeleton σ (hs ▸ holeValues (fillSkeleton σ v)) =
+          fillSkeleton (skeletonOf (fillSkeleton σ v)) (holeValues (fillSkeleton σ v)) := by
+            simpa using fillSkeleton_eq_rec hs (holeValues (fillSkeleton σ v))
+      _ = fillSkeleton σ v := fillSkeleton_holeValues (fillSkeleton σ v)
+  simpa [hs] using fillSkeleton_injective σ hfill
+
+noncomputable def exprOfSkel_equiv {τ : Ty} (σ : SkeletonsOfType τ) :
+    ExprOfSkel σ ≃ (Fin (numHoles σ) → ℝ) where
+  toFun  := fun ⟨e, he⟩ => he ▸ holeValues e
+  invFun := fun v => ⟨fillSkeleton σ v, skeletonOf_fillSkeleton σ v⟩
+  left_inv := by
+    intro x
+    rcases x with ⟨e, rfl⟩
+    apply Subtype.ext
+    simpa using fillSkeleton_holeValues e
+  right_inv := by
+    intro v
+    simpa using holeValues_fillSkeleton σ v
+
+noncomputable instance exprOfSkel_measurableSpace {τ : Ty} (σ : SkeletonsOfType τ) :
+    MeasurableSpace (ExprOfSkel σ) :=
+  MeasurableSpace.comap (exprOfSkel_equiv σ) inferInstance
+
+noncomputable instance exprOfType_measurableSpace (τ : Ty) :
+    MeasurableSpace (ExprsOfType τ) where
+  MeasurableSet' S :=
+    ∀ σ : SkeletonsOfType τ, MeasurableSet (α := ExprOfSkel σ)
+      { p : ExprOfSkel σ | p.1 ∈ S }
+  measurableSet_empty := by
+    intro σ
+    simp
+  measurableSet_compl := by
+    intro S hS σ
+    have hSσ := hS σ
+    convert MeasurableSet.compl hSσ using 1
+  measurableSet_iUnion := by
+    intro f hf σ
+    have : { p : ExprOfSkel σ | p.1 ∈ ⋃ i, f i } =
+           ⋃ i, { p : ExprOfSkel σ | p.1 ∈ f i } := by
+      ext p
+      simp [Set.mem_iUnion]
+    rw [this]
+    exact MeasurableSet.iUnion (fun i => hf i σ)
 
 end Slice
