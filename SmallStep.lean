@@ -13,6 +13,8 @@ Since μ is already a Measure, countable additivity and nonnegativity are alread
 def IsSubProbabilityMeasure {α : Type*} [MeasurableSpace α] (μ : Measure α) : Prop :=
   μ Set.univ ≤ 1
 
+def diverge : Dist Expr := 0
+
 -- ---------------------------------------------------------------------------
 -- Small-step semantics: Expr → Dist (Expr)
 -- Each expression steps to a distribution over expressions.
@@ -20,20 +22,20 @@ def IsSubProbabilityMeasure {α : Type*} [MeasurableSpace α] (μ : Measure α) 
 -- ---------------------------------------------------------------------------
 
 noncomputable def step : Expr → Dist Expr
-  | .const r =>
-      Dist.ret (.const r)
+  | .const _ =>
+      diverge
 
-  | .finconst n k =>
-      Dist.ret (.finconst n k)
+  | .finconst _ _ =>
+      diverge
 
   | .trueE =>
-      Dist.ret .trueE
+      diverge
 
   | .falseE =>
-      Dist.ret .falseE
+      diverge
 
-  | .var x =>
-      Dist.ret (.var x)
+  | .var _ =>
+      diverge
 
   | .discrete ps =>
       let rec discreteMeasureFrom (i : Nat) (qs : List Prob) : Dist ℝ :=
@@ -43,17 +45,12 @@ noncomputable def step : Expr → Dist Expr
       let discreteMeasure : Dist ℝ := discreteMeasureFrom 0 ps.1
       Dist.bind discreteMeasure (fun r => Dist.ret (.const r))
 
-  -- If e1 is a value v, substitute and return δ_{e2[v/x]}
-  -- Otherwise, step e1 and wrap: ⟦e1⟧ >>= λg. δ_{let x=g in e2}
   | .letE x e1 e2 =>
       if isValue e1 then
         Dist.ret (subst x e1 e2)
       else
         Dist.bind (step e1) (fun g => Dist.ret (.letE x g e2))
 
-  -- If e1 = const 1 (true), return δ_{e2}
-  -- If e1 = const 0 (false), return δ_{e3}
-  -- Otherwise, step e1 and wrap: ⟦e1⟧ >>= λg. δ_{if g then e2 else e3}
   | .ifE e1 e2 e3 =>
       match e1 with
       | .trueE =>
@@ -61,66 +58,34 @@ noncomputable def step : Expr → Dist Expr
       | .falseE =>
           Dist.ret e3
       | _ =>
-          if isValue e1 then
-            -- a non-const value: stuck
-            Dist.ret (.ifE e1 e2 e3)
-          else
-            Dist.bind (step e1) (fun g => Dist.ret (.ifE g e2 e3))
+          Dist.bind (step e1) (fun g => Dist.ret (.ifE g e2 e3))
 
-  -- Both values v1, v2: return δ_{true} or δ_{false}
-  -- e1 value, e2 not: step e2 and wrap
-  -- e1 not value: step e1 and wrap
   | .lt e1 e2 =>
       match e1, e2 with
       | .const v1, .const v2 =>
           if v1 < v2 then Dist.ret .trueE
           else Dist.ret .falseE
       | .const v1, _ =>
-          if isValue e2 then
-            -- e2 is a non-const value: stuck
-            Dist.ret (.lt e1 e2)
-          else
-            Dist.bind (step e2) (fun g => Dist.ret (.lt (.const v1) g))
+          Dist.bind (step e2) (fun g => Dist.ret (.lt (.const v1) g))
       | _, _ =>
-          if isValue e1 then
-            Dist.ret (.lt e1 e2)
-          else
-            Dist.bind (step e1) (fun g => Dist.ret (.lt g e2))
+          Dist.bind (step e1) (fun g => Dist.ret (.lt g e2))
 
-  -- Both values v1, v2:
-  --   if v1 ≤ v2: Uniform(v1, v2) >>= λv. δ_{v}   (i.e., the uniform distribution)
-  --   if v1 > v2: diverge (we use 0 measure / empty)
-  -- e1 value, e2 not: step e2 and wrap
-  -- e1 not value: step e1 and wrap
   | .uniform e1 e2 =>
       match e1, e2 with
       | .const v1, .const v2 =>
-          -- ADD THIS BACK for sub-probability distribution!!!!!!
-          -- if v1 ≤ v2 then
-          --   -- Uniform distribution on [v1, v2], mapping samples to .const
-          --   let lo := v1
-          --   let hi := v2
-          --   let uniformMeasure : Dist ℝ :=
-          --     ProbabilityTheory.cond MeasureTheory.volume (Set.Icc lo hi)
-          --   Dist.bind uniformMeasure (fun r => Dist.ret (.const r))
-          -- else
-          --   -- diverge: 0 measure
-          --   0
-          let lo := v1
-          let hi := v2
-          let uniformMeasure : Dist ℝ :=
-            ProbabilityTheory.cond MeasureTheory.volume (Set.Icc lo hi)
-          Dist.bind uniformMeasure (fun r => Dist.ret (.const r))
+          if v1 ≤ v2 then
+            -- Uniform distribution on [v1, v2], mapping samples to .const
+            let lo := v1
+            let hi := v2
+            let uniformMeasure : Dist ℝ :=
+              ProbabilityTheory.cond MeasureTheory.volume (Set.Icc lo hi)
+            Dist.bind uniformMeasure (fun r => Dist.ret (.const r))
+          else
+            diverge
       | .const v1, _ =>
-          if isValue e2 then
-            Dist.ret (.uniform e1 e2)
-          else
-            Dist.bind (step e2) (fun g => Dist.ret (.uniform (.const v1) g))
+          Dist.bind (step e2) (fun g => Dist.ret (.uniform (.const v1) g))
       | _, _ =>
-          if isValue e1 then
-            Dist.ret (.uniform e1 e2)
-          else
-            Dist.bind (step e1) (fun g => Dist.ret (.uniform g e2))
+          Dist.bind (step e1) (fun g => Dist.ret (.uniform g e2))
 
 -- ---------------------------------------------------------------------------
 -- Small-step semantics is a Markov kernel.
