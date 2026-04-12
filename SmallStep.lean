@@ -19,84 +19,108 @@ def IsSubProbabilityMeasure {α : Type*} [MeasurableSpace α] (μ : Measure α) 
 -- For values, we return a Dirac delta on the value itself.
 -- ---------------------------------------------------------------------------
 
-/-- Finite weighted sum of Dirac measures on `.const i`, starting at index `i`. -/
-noncomputable def discreteMeasureExprFrom (i : Nat) : List Prob → Dist Expr
-  | [] => 0
-  | p :: qs => p • Dist.ret (.const (i : ℝ)) + discreteMeasureExprFrom (i + 1) qs
+noncomputable def step : Expr → Dist Expr
+  | .const r =>
+      Dist.ret (.const r)
 
-def diverge : Dist Expr := 0
+  | .finconst n k =>
+      Dist.ret (.finconst n k)
 
-noncomputable def step (τ : Ty) : ExprsOfType τ → Dist (ExprsOfType τ)
+  | .trueE =>
+      Dist.ret .trueE
 
-  -- Values diverge
-  | ⟨.const _, _⟩    => 0
-  | ⟨.trueE, _⟩      => 0
-  | ⟨.falseE, _⟩     => 0
-  | ⟨.finconst _ _, _⟩ => 0
-  | ⟨.var _, _⟩      => 0
+  | .falseE =>
+      Dist.ret .falseE
 
-  -- discrete: sorry for now
-  | ⟨.discrete _, _⟩ => 0
+  | .var x =>
+      Dist.ret (.var x)
 
-  -- let x = e1 in e2
-  | ⟨.letE x e1 e2, h⟩ =>
-      by
-        classical
-        let hLet : ∃ τ1, HasType Ctx.empty e1 τ1 ∧ HasType (Ctx.extend Ctx.empty x τ1) e2 τ :=
-          hasType_letE_inv h
-        let τ1 : Ty := Classical.choose hLet
-        let h1 : HasType Ctx.empty e1 τ1 := (Classical.choose_spec hLet).1
-        let h2 : HasType (Ctx.extend Ctx.empty x τ1) e2 τ := (Classical.choose_spec hLet).2
-        exact
-          if isValue e1 then
-            Dist.ret ⟨subst x e1 e2, subst_preserves_type h1 h2⟩
-          else
-            Dist.bind
-              (step τ1 ⟨e1, h1⟩)
-              (fun ⟨g, hg⟩ => Dist.ret ⟨.letE x g e2, HasType.letE hg h2⟩)
+  | .discrete ps =>
+      let rec discreteMeasureFrom (i : Nat) (qs : List Prob) : Dist ℝ :=
+        match qs with
+        | [] => 0
+        | p :: qs' => p • Dist.ret (i : ℝ) + discreteMeasureFrom (i + 1) qs'
+      let discreteMeasure : Dist ℝ := discreteMeasureFrom 0 ps.1
+      Dist.bind discreteMeasure (fun r => Dist.ret (.const r))
 
-  -- if e1 then e2 else e3
-  | ⟨.ifE e1 e2 e3, h⟩ =>
-      let hc : HasType Ctx.empty e1 .bool := (hasType_ifE_inv h).1
-      let ht : HasType Ctx.empty e2 τ := (hasType_ifE_inv h).2.1
-      let hf : HasType Ctx.empty e3 τ := (hasType_ifE_inv h).2.2
+  -- If e1 is a value v, substitute and return δ_{e2[v/x]}
+  -- Otherwise, step e1 and wrap: ⟦e1⟧ >>= λg. δ_{let x=g in e2}
+  | .letE x e1 e2 =>
+      if isValue e1 then
+        Dist.ret (subst x e1 e2)
+      else
+        Dist.bind (step e1) (fun g => Dist.ret (.letE x g e2))
+
+  -- If e1 = const 1 (true), return δ_{e2}
+  -- If e1 = const 0 (false), return δ_{e3}
+  -- Otherwise, step e1 and wrap: ⟦e1⟧ >>= λg. δ_{if g then e2 else e3}
+  | .ifE e1 e2 e3 =>
       match e1 with
-      | .trueE  => Dist.ret ⟨e2, ht⟩
-      | .falseE => Dist.ret ⟨e3, hf⟩
-      | _       =>
-          -- e1 is not a boolean value; step e1 and rebuild
-          Dist.bind
-            (step .bool ⟨e1, hc⟩)
-            (fun ⟨g, hg⟩ => Dist.ret ⟨.ifE g e2 e3, HasType.ifE hg ht hf⟩)
-
-  -- e1 < e2
-  | ⟨.lt e1 e2, h⟩ =>
-      let hInv : τ = .bool ∧ HasType Ctx.empty e1 .real ∧ HasType Ctx.empty e2 .real :=
-        hasType_lt_inv h
-      let hBool : τ = .bool := hInv.1
-      let h1 : HasType Ctx.empty e1 .real := hInv.2.1
-      let h2 : HasType Ctx.empty e2 .real := hInv.2.2
-      hBool ▸
-      match e1 with
-      | .const v1 =>
-          match e2 with
-          | .const v2 =>
-              if v1 < v2 then Dist.ret ⟨.trueE, HasType.trueE⟩
-              else            Dist.ret ⟨.falseE, HasType.falseE⟩
-          | _ =>
-              Dist.bind
-                (step .real ⟨e2, h2⟩)
-                (fun ⟨g, hg⟩ => Dist.ret ⟨.lt (.const v1) g, HasType.lt HasType.const hg⟩)
+      | .trueE =>
+          Dist.ret e2
+      | .falseE =>
+          Dist.ret e3
       | _ =>
-          Dist.bind
-            (step .real ⟨e1, h1⟩)
-            (fun ⟨g, hg⟩ => Dist.ret ⟨.lt g e2, HasType.lt hg h2⟩)
+          if isValue e1 then
+            -- a non-const value: stuck
+            Dist.ret (.ifE e1 e2 e3)
+          else
+            Dist.bind (step e1) (fun g => Dist.ret (.ifE g e2 e3))
 
-  -- uniform e1 e2: sorry for now
-  | ⟨.uniform _ _, _⟩ => 0
+  -- Both values v1, v2: return δ_{true} or δ_{false}
+  -- e1 value, e2 not: step e2 and wrap
+  -- e1 not value: step e1 and wrap
+  | .lt e1 e2 =>
+      match e1, e2 with
+      | .const v1, .const v2 =>
+          if v1 < v2 then Dist.ret .trueE
+          else Dist.ret .falseE
+      | .const v1, _ =>
+          if isValue e2 then
+            -- e2 is a non-const value: stuck
+            Dist.ret (.lt e1 e2)
+          else
+            Dist.bind (step e2) (fun g => Dist.ret (.lt (.const v1) g))
+      | _, _ =>
+          if isValue e1 then
+            Dist.ret (.lt e1 e2)
+          else
+            Dist.bind (step e1) (fun g => Dist.ret (.lt g e2))
 
-termination_by e => sizeOf e.1
-
+  -- Both values v1, v2:
+  --   if v1 ≤ v2: Uniform(v1, v2) >>= λv. δ_{v}   (i.e., the uniform distribution)
+  --   if v1 > v2: diverge (we use 0 measure / empty)
+  -- e1 value, e2 not: step e2 and wrap
+  -- e1 not value: step e1 and wrap
+  | .uniform e1 e2 =>
+      match e1, e2 with
+      | .const v1, .const v2 =>
+          -- ADD THIS BACK for sub-probability distribution!!!!!!
+          -- if v1 ≤ v2 then
+          --   -- Uniform distribution on [v1, v2], mapping samples to .const
+          --   let lo := v1
+          --   let hi := v2
+          --   let uniformMeasure : Dist ℝ :=
+          --     ProbabilityTheory.cond MeasureTheory.volume (Set.Icc lo hi)
+          --   Dist.bind uniformMeasure (fun r => Dist.ret (.const r))
+          -- else
+          --   -- diverge: 0 measure
+          --   0
+          let lo := v1
+          let hi := v2
+          let uniformMeasure : Dist ℝ :=
+            ProbabilityTheory.cond MeasureTheory.volume (Set.Icc lo hi)
+          Dist.bind uniformMeasure (fun r => Dist.ret (.const r))
+      | .const v1, _ =>
+          if isValue e2 then
+            Dist.ret (.uniform e1 e2)
+          else
+            Dist.bind (step e2) (fun g => Dist.ret (.uniform (.const v1) g))
+      | _, _ =>
+          if isValue e1 then
+            Dist.ret (.uniform e1 e2)
+          else
+            Dist.bind (step e1) (fun g => Dist.ret (.uniform g e2))
 
 -- ---------------------------------------------------------------------------
 -- Small-step semantics is a Markov kernel.
@@ -149,8 +173,8 @@ lemma uniform_right_measurable (v1 : ℝ) :
     Measurable (fun g : Expr => Dist.ret (Expr.uniform (.const v1) g)) := by
   sorry
 
-lemma step_is_subprob_measure (τ : Ty) (e : ExprsOfType τ) :
-    IsSubProbabilityMeasure (step τ e) := by sorry
+lemma step_is_subprob_measure (e : Expr) :
+    IsSubProbabilityMeasure (step e) := by sorry
 
 -- ---------------------------------------------------------------------------
 -- 2. Measurability
@@ -175,16 +199,16 @@ lemma bind_is_measurable {α β γ : Type*}
   exact (MeasureTheory.Measure.measurable_bind' hk).comp hf
 
 /-- Step is measurable -/
-lemma step_is_measurable (τ : Ty) : Measurable (step τ) := by
+lemma step_is_measurable : Measurable step := by
   sorry
 
-noncomputable def stepKernel (τ : Ty) : Kernel (ExprsOfType τ) (ExprsOfType τ) where
-  toFun    := step τ
-  measurable' := step_is_measurable τ
+noncomputable def stepKernel : Kernel Expr Expr where
+  toFun    := step
+  measurable' := step_is_measurable
 
 /-- For typed inputs, `stepKernel` is subprobability. -/
-theorem stepKernel_subprob_on_welltyped (τ : Ty) (e : ExprsOfType τ) :
-    IsSubProbabilityMeasure (stepKernel τ e) := by
-  simpa [stepKernel] using step_is_subprob_measure τ e
+theorem stepKernel_subprob_on_welltyped (e : Expr) (_ : WellTyped e) :
+    IsSubProbabilityMeasure (stepKernel e) := by
+  simpa [stepKernel] using step_is_subprob_measure e
 
 end Slice
