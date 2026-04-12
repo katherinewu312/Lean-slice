@@ -8,7 +8,7 @@ open MeasureTheory ProbabilityTheory
 namespace Untyped
 
 --- Expression skeletons
---- A skeleton is syntactically identicak to Expr except that every const r is replaced by a hole. Formally, this is the paper's set Skel.
+--- A skeleton is syntactically identical to Expr except that every const r is replaced by a hole. Formally, this is the paper's set Skel.
 inductive Skeleton : Type where
   | hole : Skeleton
   | var : String → Skeleton
@@ -68,7 +68,6 @@ def fillSkeleton : (s : Skeleton) → (Fin (numHoles s) → ℝ) → Expr
       let v2 : Fin (numHoles s2) → ℝ := fun i => v (Fin.natAdd (numHoles s1) i)
       .uniform (fillSkeleton s1 v1) (fillSkeleton s2 v2)
 
-
 --- Decomposing an expression ---
 
 -- Extract the skeleton of an expression.
@@ -84,41 +83,7 @@ def skeletonOf : Expr → Skeleton
   | .letE x e₁ e₂  => .letE x (skeletonOf e₁) (skeletonOf e₂)
   | .uniform e₁ e₂  => .uniform (skeletonOf e₁) (skeletonOf e₂)
 
--- Extract real constants from e in left-to-right order, accumulating into a list.
-def holeValuesList : Expr → List ℝ
-  | .var _ => []
-  | .const r => [r]
-  | .trueE => []
-  | .falseE => []
-  | .finconst _ _ => []
-  | .discrete _ => []
-  | .lt e1 e2 => holeValuesList e1 ++ holeValuesList e2
-  | .ifE e1 e2 e3 => holeValuesList e1 ++ holeValuesList e2 ++ holeValuesList e3
-  | .letE _ e1 e2 => holeValuesList e1 ++ holeValuesList e2
-  | .uniform e1 e2 => holeValuesList e1 ++ holeValuesList e2
-
--- Length of holeValuesList equals numHoles of the skeleton.
-@[simp]
-theorem holeValuesList_length (e : Expr) :
-  (holeValuesList e).length = numHoles (skeletonOf e) := by
-  induction e with
-  | var _ => simp [holeValuesList, skeletonOf, numHoles]
-  | const _         => simp [holeValuesList, skeletonOf, numHoles]
-  | trueE           => simp [holeValuesList, skeletonOf, numHoles]
-  | falseE          => simp [holeValuesList, skeletonOf, numHoles]
-  | finconst _ _    => simp [holeValuesList, skeletonOf, numHoles]
-  | discrete _      => simp [holeValuesList, skeletonOf, numHoles]
-  | lt e₁ e₂ ih₁ ih₂ =>
-      simp [holeValuesList, skeletonOf, numHoles, List.length_append, ih₁, ih₂]
-  | ifE e₁ e₂ e₃ ih₁ ih₂ ih₃ =>
-      simp [holeValuesList, skeletonOf, numHoles, List.length_append, ih₁, ih₂, ih₃]
-  | letE _ e₁ e₂ ih₁ ih₂ =>
-      simp [holeValuesList, skeletonOf, numHoles, List.length_append, ih₁, ih₂]
-  | uniform e₁ e₂ ih₁ ih₂ =>
-      simp [holeValuesList, skeletonOf, numHoles, List.length_append, ih₁, ih₂]
-
-
--- The vector of real constants appearing in e, left-to-right. This is the second component of the decomposition function, dec₂.
+-- The vector of real constants appearing in an expression, from left-to-right.
 def holeValues : (e : Expr) → Fin (numHoles (skeletonOf e)) → ℝ
   | .var _ =>
       Fin.elim0
@@ -151,7 +116,7 @@ def holeValues : (e : Expr) → Fin (numHoles (skeletonOf e)) → ℝ
 
 
 -- The set of expressions whose skeleton is exactly s.
-def ExprOfSkel (s : Skeleton) : Type :=
+def ExprsOfSkel (s : Skeleton) : Type :=
   {e : Expr // skeletonOf e = s}
 
 
@@ -212,7 +177,6 @@ lemma fillSkeleton_eq_rec {s t : Skeleton} (h : s = t) (v : Fin (numHoles s) →
     fillSkeleton t (h ▸ v) = fillSkeleton s v := by
   cases h
   rfl
-
 
 -- For a fixed s, the map fillSkeleton is injective: so if two hole assignments produce the same filled expression, those assignments were equal.
 theorem fillSkeleton_injective (σ : Skeleton) :
@@ -348,9 +312,9 @@ theorem holeValues_fillSkeleton (σ : Skeleton) (v : Fin (numHoles σ) → ℝ) 
   simpa [hs] using fillSkeleton_injective σ hfill
 
 
--- Bijection: ExprOfSkel s <-> (Fin (numHoles s) → ℝ)
-noncomputable def exprOfSkel_equiv (σ : Skeleton) :
-    ExprOfSkel σ ≃ (Fin (numHoles σ) → ℝ) where
+-- Bijection: ExprsOfSkel s <-> (Fin (numHoles s) → ℝ)
+noncomputable def exprsOfSkel_equiv (σ : Skeleton) :
+    ExprsOfSkel σ ≃ (Fin (numHoles σ) → ℝ) where
   toFun  := fun ⟨e, he⟩ => he ▸ holeValues e
   invFun := fun v => ⟨fillSkeleton σ v, skeletonOf_fillSkeleton σ v⟩
   left_inv := by
@@ -362,41 +326,39 @@ noncomputable def exprOfSkel_equiv (σ : Skeleton) :
     intro v
     simpa using holeValues_fillSkeleton σ v
 
--- Transport the Borel sigma-algebra on Fin (numHoles s) → ℝ along the bijection exprOfSkel_equiv s, to obtain exprOfSkel measurable
-noncomputable instance exprOfSkel_measurableSpace (σ : Skeleton) :
-    MeasurableSpace (ExprOfSkel σ) :=
-  MeasurableSpace.comap (exprOfSkel_equiv σ) inferInstance
+-- Transport the Borel sigma-algebra on Fin (numHoles s) → ℝ along the bijection exprsOfSkel_equiv s, to obtain exprsOfSkel measurable
+noncomputable instance exprsOfSkel_measurableSpace (σ : Skeleton) :
+    MeasurableSpace (ExprsOfSkel σ) :=
+  MeasurableSpace.comap (exprsOfSkel_equiv σ) inferInstance
 
--- Take disjoint union of exprOfSkel to obtain Expr measurable.
+-- Take disjoint union of exprsOfSkel to obtain Expr measurable.
 instance expr_measurableSpace : MeasurableSpace Expr where
   MeasurableSet' S :=
-    ∀ σ : Skeleton, MeasurableSet (α := ExprOfSkel σ)
-      { p : ExprOfSkel σ | p.1 ∈ S }
+    ∀ σ : Skeleton, MeasurableSet (α := ExprsOfSkel σ)
+      { p : ExprsOfSkel σ | p.1 ∈ S }
   measurableSet_empty := by
     intro σ
     simp
   measurableSet_compl := by
     intro S hS σ
     have hSσ := hS σ
-    -- {p | p.1 ∈ Sᶜ} = ({p | p.1 ∈ S})ᶜ  in ExprOfSkel σ
+    -- {p | p.1 ∈ Sᶜ} = ({p | p.1 ∈ S})ᶜ  in ExprsOfSkel σ
     convert MeasurableSet.compl hSσ using 1
   measurableSet_iUnion := by
     intro f hf σ
-    have : { p : ExprOfSkel σ | p.1 ∈ ⋃ i, f i } =
-           ⋃ i, { p : ExprOfSkel σ | p.1 ∈ f i } := by
+    have : { p : ExprsOfSkel σ | p.1 ∈ ⋃ i, f i } =
+           ⋃ i, { p : ExprsOfSkel σ | p.1 ∈ f i } := by
       ext ⟨e, he⟩; simp [Set.mem_iUnion]
     rw [this]
     exact MeasurableSet.iUnion (fun i => hf i σ)
 
-/-- Subspace measurable structure on well-typed expressions of type τ,
-    inherited from the disjoint-union structure on all Expr. -/
-noncomputable instance exprOfType_measurableSpace (τ : Ty) :
-    MeasurableSpace (ExprsOfType τ) :=
-  MeasurableSpace.comap (fun ⟨e, _⟩ => e) expr_measurableSpace
-
 end Untyped
 
-/-- Skeleton typing: identical to `HasType` on expressions, except holes stand for real constants. -/
+-- ---------------------------------------------------------------------------
+-- Well-typed skeletons.
+-- ---------------------------------------------------------------------------
+
+/-- Typing judgement for skeletons. Identical to `HasType` on expressions, except holes stand for real constants. -/
 inductive HasTypeSkel : Ctx → Untyped.Skeleton → Ty → Prop where
   | hole {Γ : Ctx} :
       HasTypeSkel Γ .hole .real
@@ -442,30 +404,9 @@ inductive HasTypeSkel : Ctx → Untyped.Skeleton → Ty → Prop where
 def SkeletonsOfType (τ : Ty) : Type :=
   {s : Untyped.Skeleton // HasTypeSkel Ctx.empty s τ}
 
-lemma hasTypeSkel_of_hasType {Γ : Ctx} {e : Expr} {τ : Ty}
-    (h : HasType Γ e τ) :
-    HasTypeSkel Γ (Untyped.skeletonOf e) τ := by
-  induction h with
-  | var hx =>
-      exact HasTypeSkel.var hx
-  | const =>
-      exact HasTypeSkel.hole
-  | trueE =>
-      exact HasTypeSkel.trueE
-  | falseE =>
-      exact HasTypeSkel.falseE
-  | finconst k =>
-      exact HasTypeSkel.finconst k
-  | discrete =>
-      exact HasTypeSkel.discrete
-  | letE h1 h2 ih1 ih2 =>
-      simpa [Untyped.skeletonOf] using HasTypeSkel.letE ih1 ih2
-  | lt h1 h2 ih1 ih2 =>
-      simpa [Untyped.skeletonOf] using HasTypeSkel.lt ih1 ih2
-  | ifE hc ht hf ihc iht ihf =>
-      simpa [Untyped.skeletonOf] using HasTypeSkel.ifE ihc iht ihf
-  | uniform h1 h2 ih1 ih2 =>
-      simpa [Untyped.skeletonOf] using HasTypeSkel.uniform ih1 ih2
+-- Number of holes in a well-typed skeleton is the same as in an untyped skeleton.
+def numHoles {τ : Ty} (s : SkeletonsOfType τ) : ℕ :=
+  Untyped.numHoles s.1
 
 lemma fillSkeleton_preserves_type {Γ : Ctx} {s : Untyped.Skeleton} {τ : Ty}
     (hs : HasTypeSkel Γ s τ) :
@@ -516,30 +457,48 @@ lemma fillSkeleton_preserves_type {Γ : Ctx} {s : Untyped.Skeleton} {τ : Ty}
           (ih1 (fun i => v (Fin.castAdd _ i)))
           (ih2 (fun i => v (Fin.natAdd _ i))))
 
--- Typed API
-
-def numHoles {τ : Ty} (s : SkeletonsOfType τ) : ℕ :=
-  Untyped.numHoles s.1
-
+-- Fills a well-typed skeleton s with hole assignment v, reading holes left-to-right, producing a well-typed expression
 def fillSkeleton {τ : Ty} (s : SkeletonsOfType τ) :
     (Fin (numHoles s) → ℝ) → ExprsOfType τ
   | v => ⟨Untyped.fillSkeleton s.1 v, fillSkeleton_preserves_type s.2 v⟩
 
+-- Replacing every real constant in a well-typed expression by a hole produces a well-typed skeleton (of the same type).
+lemma hasTypeSkel_of_hasType {Γ : Ctx} {e : Expr} {τ : Ty}
+    (h : HasType Γ e τ) :
+    HasTypeSkel Γ (Untyped.skeletonOf e) τ := by
+  induction h with
+  | var hx =>
+      exact HasTypeSkel.var hx
+  | const =>
+      exact HasTypeSkel.hole
+  | trueE =>
+      exact HasTypeSkel.trueE
+  | falseE =>
+      exact HasTypeSkel.falseE
+  | finconst k =>
+      exact HasTypeSkel.finconst k
+  | discrete =>
+      exact HasTypeSkel.discrete
+  | letE h1 h2 ih1 ih2 =>
+      simpa [Untyped.skeletonOf] using HasTypeSkel.letE ih1 ih2
+  | lt h1 h2 ih1 ih2 =>
+      simpa [Untyped.skeletonOf] using HasTypeSkel.lt ih1 ih2
+  | ifE hc ht hf ihc iht ihf =>
+      simpa [Untyped.skeletonOf] using HasTypeSkel.ifE ihc iht ihf
+  | uniform h1 h2 ih1 ih2 =>
+      simpa [Untyped.skeletonOf] using HasTypeSkel.uniform ih1 ih2
+
+
+-- Extract the well-typed skeleton of a well-typed expression.
 def skeletonOf {τ : Ty} (e : ExprsOfType τ) : SkeletonsOfType τ :=
   ⟨Untyped.skeletonOf e.1, hasTypeSkel_of_hasType e.2⟩
 
-def holeValuesList {τ : Ty} (e : ExprsOfType τ) : List ℝ :=
-  Untyped.holeValuesList e.1
-
-@[simp]
-theorem holeValuesList_length {τ : Ty} (e : ExprsOfType τ) :
-  (holeValuesList e).length = numHoles (skeletonOf e) := by
-  simp [holeValuesList, numHoles, skeletonOf, Untyped.holeValuesList_length]
-
+-- The vector of real constants appearing in a well-typed expression, from left-to-right. This is the second component of dec₂.
 def holeValues {τ : Ty} (e : ExprsOfType τ) : Fin (numHoles (skeletonOf e)) → ℝ := by
   simpa [numHoles, skeletonOf] using (Untyped.holeValues e.1)
 
-def ExprOfSkel {τ : Ty} (s : SkeletonsOfType τ) : Type :=
+-- The set of well-typed expressions whose skeleton is exactly s:τ.
+def ExprsOfSkel {τ : Ty} (s : SkeletonsOfType τ) : Type :=
   {e : ExprsOfType τ // skeletonOf e = s}
 
 theorem fillSkeleton_holeValues {τ : Ty} (e : ExprsOfType τ) :
@@ -579,8 +538,9 @@ theorem holeValues_fillSkeleton {τ : Ty} (σ : SkeletonsOfType τ) (v : Fin (nu
       _ = fillSkeleton σ v := fillSkeleton_holeValues (fillSkeleton σ v)
   simpa [hs] using fillSkeleton_injective σ hfill
 
-noncomputable def exprOfSkel_equiv {τ : Ty} (σ : SkeletonsOfType τ) :
-    ExprOfSkel σ ≃ (Fin (numHoles σ) → ℝ) where
+-- Bijection: ExprsOfSkel s:τ <-> (Fin (numHoles s:τ) → ℝ)
+noncomputable def exprsOfSkel_equiv {τ : Ty} (σ : SkeletonsOfType τ) :
+    ExprsOfSkel σ ≃ (Fin (numHoles σ) → ℝ) where
   toFun  := fun ⟨e, he⟩ => he ▸ holeValues e
   invFun := fun v => ⟨fillSkeleton σ v, skeletonOf_fillSkeleton σ v⟩
   left_inv := by
@@ -592,29 +552,13 @@ noncomputable def exprOfSkel_equiv {τ : Ty} (σ : SkeletonsOfType τ) :
     intro v
     simpa using holeValues_fillSkeleton σ v
 
-noncomputable instance exprOfSkel_measurableSpace {τ : Ty} (σ : SkeletonsOfType τ) :
-    MeasurableSpace (ExprOfSkel σ) :=
-  MeasurableSpace.comap (exprOfSkel_equiv σ) inferInstance
+noncomputable instance exprsOfSkel_measurableSpace {τ : Ty} (σ : SkeletonsOfType τ) :
+    MeasurableSpace (ExprsOfSkel σ) :=
+  MeasurableSpace.comap (exprsOfSkel_equiv σ) inferInstance
 
-noncomputable instance exprOfType_measurableSpace (τ : Ty) :
-    MeasurableSpace (ExprsOfType τ) where
-  MeasurableSet' S :=
-    ∀ σ : SkeletonsOfType τ, MeasurableSet (α := ExprOfSkel σ)
-      { p : ExprOfSkel σ | p.1 ∈ S }
-  measurableSet_empty := by
-    intro σ
-    simp
-  measurableSet_compl := by
-    intro S hS σ
-    have hSσ := hS σ
-    convert MeasurableSet.compl hSσ using 1
-  measurableSet_iUnion := by
-    intro f hf σ
-    have : { p : ExprOfSkel σ | p.1 ∈ ⋃ i, f i } =
-           ⋃ i, { p : ExprOfSkel σ | p.1 ∈ f i } := by
-      ext p
-      simp [Set.mem_iUnion]
-    rw [this]
-    exact MeasurableSet.iUnion (fun i => hf i σ)
+/-- Well-typed expressions of type τ is measurable. -/
+noncomputable instance exprsOfType_measurableSpace (τ : Ty) :
+    MeasurableSpace (ExprsOfType τ) :=
+  MeasurableSpace.comap (fun ⟨e, _⟩ => e) Untyped.expr_measurableSpace
 
 end Slice
