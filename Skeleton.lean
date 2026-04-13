@@ -331,6 +331,19 @@ noncomputable instance exprsOfSkel_measurableSpace (σ : Skeleton) :
     MeasurableSpace (ExprsOfSkel σ) :=
   MeasurableSpace.comap (exprsOfSkel_equiv σ) inferInstance
 
+noncomputable instance exprsOfSkel_measurableSingletonClass (σ : Skeleton) :
+    MeasurableSingletonClass (ExprsOfSkel σ) where
+  measurableSet_singleton x := by
+    change ∃ s', MeasurableSet s' ∧ (exprsOfSkel_equiv σ) ⁻¹' s' = ({x} : Set (ExprsOfSkel σ))
+    refine ⟨{exprsOfSkel_equiv σ x}, measurableSet_singleton _, ?_⟩
+    ext y
+    constructor
+    · intro hy
+      apply (exprsOfSkel_equiv σ).injective
+      simpa [Set.mem_singleton_iff] using hy
+    · intro hy
+      simpa [Set.mem_singleton_iff, hy]
+
 -- Take disjoint union of exprsOfSkel to obtain Expr measurable.
 instance expr_measurableSpace : MeasurableSpace Expr where
   MeasurableSet' S :=
@@ -351,6 +364,128 @@ instance expr_measurableSpace : MeasurableSpace Expr where
       ext ⟨e, he⟩; simp [Set.mem_iUnion]
     rw [this]
     exact MeasurableSet.iUnion (fun i => hf i σ)
+
+instance expr_measurableSingletonClass : MeasurableSingletonClass Expr where
+  measurableSet_singleton e := by
+    intro σ
+    by_cases hs : skeletonOf e = σ
+    · let pe : ExprsOfSkel σ := ⟨e, hs⟩
+      have hset :
+          { p : ExprsOfSkel σ | p.1 ∈ ({e} : Set Expr) } =
+            ({pe} : Set (ExprsOfSkel σ)) := by
+        ext p
+        constructor
+        · intro hp
+          apply Set.mem_singleton_iff.mpr
+          apply Subtype.ext
+          simpa [Set.mem_singleton_iff] using hp
+        · intro hp
+          rcases Set.mem_singleton_iff.mp hp with rfl
+          simp [pe]
+      have hmeas : MeasurableSet (({pe} : Set (ExprsOfSkel σ))) :=
+        measurableSet_singleton pe
+      exact hset ▸ hmeas
+    · have hset :
+          { p : ExprsOfSkel σ | p.1 ∈ ({e} : Set Expr) } =
+            (∅ : Set (ExprsOfSkel σ)) := by
+        ext p
+        constructor
+        · intro hp
+          have hpe : p.1 = e := by
+            simpa [Set.mem_singleton_iff] using hp
+          have : skeletonOf e = σ := by
+            simpa [hpe] using p.2
+          exact (hs this).elim
+        · intro hp
+          exact False.elim (Set.notMem_empty p hp)
+      have hmeas : MeasurableSet (∅ : Set (ExprsOfSkel σ)) := MeasurableSet.empty
+      exact hset ▸ hmeas
+
+/-- Transport the Euclidean topology on `Fin (numHoles σ) → ℝ` across the
+    bijection `exprsOfSkel_equiv σ` to get a topology on `ExprsOfSkel σ`. -/
+noncomputable instance exprsOfSkel_topologicalSpace (σ : Skeleton) :
+    TopologicalSpace (ExprsOfSkel σ) :=
+  TopologicalSpace.induced (exprsOfSkel_equiv σ) inferInstance
+
+noncomputable instance exprsOfSkel_t1Space (σ : Skeleton) :
+    T1Space (ExprsOfSkel σ) :=
+  (exprsOfSkel_equiv σ).injective.isEmbedding_induced.t1Space
+
+/-- The disjoint-union topology on `Expr`:
+    a set `S` is open iff for every skeleton `σ`, the slice
+    `{ p : ExprsOfSkel σ | p.1 ∈ S }` is open in `ExprsOfSkel σ`. -/
+instance expr_topologicalSpace : TopologicalSpace Expr where
+  IsOpen S :=
+    ∀ σ : Skeleton,
+      IsOpen { p : ExprsOfSkel σ | p.1 ∈ S }
+  isOpen_univ := by
+    intro σ
+    simp
+  isOpen_inter := by
+    intro S T hS hT σ
+    have hSσ : IsOpen { p : ExprsOfSkel σ | p.1 ∈ S } := hS σ
+    have hTσ : IsOpen { p : ExprsOfSkel σ | p.1 ∈ T } := hT σ
+    have hEq :
+        { p : ExprsOfSkel σ | p.1 ∈ S ∩ T } =
+          ({ p : ExprsOfSkel σ | p.1 ∈ S } ∩ { p : ExprsOfSkel σ | p.1 ∈ T }) := by
+      ext p
+      simp
+    rw [hEq]
+    exact hSσ.inter hTσ
+  isOpen_sUnion := by
+    intro 𝒮 h𝒮 σ
+    have hEq :
+        { p : ExprsOfSkel σ | p.1 ∈ ⋃₀ 𝒮 } =
+          ⋃ s ∈ 𝒮, ({ p : ExprsOfSkel σ | p.1 ∈ s } : Set (ExprsOfSkel σ)) := by
+      ext p
+      simp [Set.mem_sUnion]
+    rw [hEq]
+    exact isOpen_iUnion (fun s => isOpen_iUnion (fun hs => h𝒮 s hs σ))
+
+instance expr_t1Space : T1Space Expr := by
+  refine t1Space_iff_exists_open.2 ?_
+  intro x y hxy
+  refine ⟨({y}ᶜ : Set Expr), ?_, by simpa using hxy, by simp⟩
+  intro σ
+  by_cases hs : skeletonOf y = σ
+  · let py : ExprsOfSkel σ := ⟨y, hs⟩
+    have hset :
+        { p : ExprsOfSkel σ | p.1 ∈ ({y}ᶜ : Set Expr) } =
+          (({py} : Set (ExprsOfSkel σ))ᶜ) := by
+      ext p
+      constructor
+      · intro hp
+        intro hp'
+        rcases Set.mem_singleton_iff.mp hp' with hp'
+        apply hp
+        exact congrArg Subtype.val hp'
+      · intro hp
+        have hp' : p ≠ py := by
+          simpa [Set.mem_compl_iff, Set.mem_singleton_iff] using hp
+        have hpy : p.1 ≠ y := by
+          intro hpe
+          apply hp'
+          apply Subtype.ext
+          simpa [py, hpe]
+        simpa [Set.mem_compl_iff, Set.mem_singleton_iff] using hpy
+    rw [hset]
+    exact isOpen_compl_iff.mpr isClosed_singleton
+  · have hset :
+        { p : ExprsOfSkel σ | p.1 ∈ ({y}ᶜ : Set Expr) } =
+          (Set.univ : Set (ExprsOfSkel σ)) := by
+      ext p
+      constructor
+      · intro _
+        simp
+      · intro _
+        have hpy : p.1 ≠ y := by
+          intro hpe
+          have : skeletonOf y = σ := by
+            simpa [hpe] using p.2
+          exact (hs this).elim
+        simpa [Set.mem_compl_iff, Set.mem_singleton_iff] using hpy
+    rw [hset]
+    simp
 
 end Untyped
 
@@ -560,5 +695,17 @@ noncomputable instance exprsOfSkel_measurableSpace {τ : Ty} (σ : SkeletonsOfTy
 noncomputable instance exprsOfType_measurableSpace (τ : Ty) :
     MeasurableSpace (ExprsOfType τ) :=
   MeasurableSpace.comap (fun ⟨e, _⟩ => e) Untyped.expr_measurableSpace
+
+-- ---------------------------------------------------------------------------
+-- Topology on well-typed expressions
+-- ---------------------------------------------------------------------------
+
+noncomputable instance exprsOfType_topologicalSpace (τ : Ty) :
+    TopologicalSpace (ExprsOfType τ) :=
+  TopologicalSpace.induced (fun x : ExprsOfType τ => x.1) inferInstance
+
+noncomputable instance exprsOfSkel_topologicalSpace {τ : Ty} (σ : SkeletonsOfType τ) :
+    TopologicalSpace (ExprsOfSkel σ) :=
+  TopologicalSpace.induced (exprsOfSkel_equiv σ) inferInstance
 
 end Slice

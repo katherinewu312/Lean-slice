@@ -1,4 +1,5 @@
 import Mathlib.Probability.Kernel.Defs
+import Mathlib.MeasureTheory.Measure.Support
 import Syntax
 import Monad
 import Skeleton
@@ -21,6 +22,8 @@ def diverge : Dist Expr := 0
 -- For values, we return a Dirac delta on the value itself.
 -- ---------------------------------------------------------------------------
 
+namespace Untyped
+
 noncomputable def step : Expr → Dist Expr
   | .const _ =>
       diverge
@@ -38,12 +41,10 @@ noncomputable def step : Expr → Dist Expr
       diverge
 
   | .discrete ps =>
-      let rec discreteMeasureFrom (i : Nat) (qs : List Prob) : Dist ℝ :=
-        match qs with
-        | [] => 0
-        | p :: qs' => p • Dist.ret (i : ℝ) + discreteMeasureFrom (i + 1) qs'
-      let discreteMeasure : Dist ℝ := discreteMeasureFrom 0 ps.1
-      Dist.bind discreteMeasure (fun r => Dist.ret (.const r))
+      let n := ps.1.length
+      let discreteMeasure : Dist (Fin n) :=
+        Finset.univ.sum (fun i : Fin n => (ps.1.get i) • Dist.ret i)
+      Dist.bind discreteMeasure (fun i => Dist.ret (.finconst n i))
 
   | .letE x e1 e2 =>
       if isValue e1 then
@@ -87,6 +88,76 @@ noncomputable def step : Expr → Dist Expr
       | _, _ =>
           Dist.bind (step e1) (fun g => Dist.ret (.uniform g e2))
 
+end Untyped
+
+lemma step_preserves_type_strong {τ : Ty} {e : Expr}
+    (he : HasType Ctx.empty e τ) (e' : Expr)
+    (hstep : e' ∈ (Untyped.step e).support) :
+    HasType Ctx.empty e' τ := by
+  cases he with
+  | const | trueE | falseE | var | finconst =>
+      simpa [Untyped.step, diverge, Measure.support_zero] using hstep
+  | discrete =>
+      simp [Untyped.step, Dist.ret_is_dirac, Measure.support_dirac,
+        Measure.support_bind] at hstep
+      rcases hstep with ⟨i, _, rfl⟩
+      exact HasType.finconst i
+  | letE h1 h2 =>
+      simp only [Untyped.step] at hstep
+      split_ifs at hstep with hv
+      · simp [Dist.ret_is_dirac, Measure.support_dirac] at hstep
+        simpa [hstep] using (subst_preserves_type h1 h2)
+      · simp [Measure.support_bind, Dist.ret_is_dirac, Measure.support_dirac] at hstep
+        rcases hstep with ⟨g, hg, rfl⟩
+        exact HasType.letE (step_preserves_type_strong h1 g hg) h2
+  | lt h1 h2 =>
+      simp only [Untyped.step] at hstep
+      split at hstep
+      · split at hstep
+        · simp [Dist.ret_is_dirac, Measure.support_dirac] at hstep
+          simpa [hstep] using (HasType.trueE (Γ := Ctx.empty))
+        · simp [Dist.ret_is_dirac, Measure.support_dirac] at hstep
+          simpa [hstep] using (HasType.falseE (Γ := Ctx.empty))
+      · simp [Measure.support_bind, Dist.ret_is_dirac, Measure.support_dirac] at hstep
+        rcases hstep with ⟨g, hg, rfl⟩
+        exact HasType.lt h1 (step_preserves_type_strong h2 g hg)
+      · simp [Measure.support_bind, Dist.ret_is_dirac, Measure.support_dirac] at hstep
+        rcases hstep with ⟨g, hg, rfl⟩
+        exact HasType.lt (step_preserves_type_strong h1 g hg) h2
+  | ifE hc ht hf =>
+      simp only [Untyped.step] at hstep
+      split at hstep
+      · simp [Dist.ret_is_dirac, Measure.support_dirac] at hstep
+        simpa [hstep] using ht
+      · simp [Dist.ret_is_dirac, Measure.support_dirac] at hstep
+        simpa [hstep] using hf
+      · simp [Measure.support_bind, Dist.ret_is_dirac, Measure.support_dirac] at hstep
+        rcases hstep with ⟨g, hg, rfl⟩
+        exact HasType.ifE (step_preserves_type_strong hc g hg) ht hf
+  | uniform h1 h2 =>
+      simp only [Untyped.step] at hstep
+      split at hstep
+      · split at hstep
+        · simp [Measure.support_bind, Dist.ret_is_dirac, Measure.support_dirac] at hstep
+          rcases hstep with ⟨_, _, rfl⟩
+          exact HasType.const
+        · simp [diverge, Measure.support_zero] at hstep
+      · simp [Measure.support_bind, Dist.ret_is_dirac, Measure.support_dirac] at hstep
+        rcases hstep with ⟨g, hg, rfl⟩
+        exact HasType.uniform h1 (step_preserves_type_strong h2 g hg)
+      · simp [Measure.support_bind, Dist.ret_is_dirac, Measure.support_dirac] at hstep
+        rcases hstep with ⟨g, hg, rfl⟩
+        exact HasType.uniform (step_preserves_type_strong h1 g hg) h2
+
+noncomputable def step {τ : Ty} (e : ExprsOfType τ) : Dist (ExprsOfType τ) := by
+  classical
+  exact (Untyped.step e.1).map (fun e' =>
+    if h : e' ∈ (Untyped.step e.1).support then
+      (⟨e', step_preserves_type_strong e.2 e' h⟩ : ExprsOfType τ)
+    else
+      e)
+
+
 -- ---------------------------------------------------------------------------
 -- Small-step semantics is a Markov kernel.
 -- 1. Subprobability measure
@@ -108,7 +179,7 @@ lemma bind_is_subprob_measure {α β : Type} [MeasurableSpace α] [MeasurableSpa
     (hμ : IsSubProbabilityMeasure μ)
     (hk : ∀ x, IsSubProbabilityMeasure (k x))
     (hkm : Measurable k) :
-    IsSubProbabilityMeasure (μ >>= k) := by
+    IsSubProbabilityMeasure (Dist.bind μ k) := by
   unfold IsSubProbabilityMeasure at hμ hk ⊢
   rw [Dist.bind_is_measure_bind, Measure.bind_apply MeasurableSet.univ hkm.aemeasurable]
   exact (lintegral_mono (fun a => hk a)).trans (by simp [hμ])
@@ -139,7 +210,7 @@ lemma uniform_right_measurable (v1 : ℝ) :
   sorry
 
 lemma step_is_subprob_measure (e : Expr) :
-    IsSubProbabilityMeasure (step e) := by sorry
+    IsSubProbabilityMeasure (Untyped.step e) := by sorry
 
 -- ---------------------------------------------------------------------------
 -- 2. Measurability
@@ -163,12 +234,12 @@ lemma bind_is_measurable {α β γ : Type*}
     Measurable (fun x => (f x).bind k) := by
   exact (MeasureTheory.Measure.measurable_bind' hk).comp hf
 
-/-- Step is measurable -/
-lemma step_is_measurable : Measurable step := by
+/-- Untyped step is measurable -/
+lemma step_is_measurable : Measurable Untyped.step := by
   sorry
 
 noncomputable def stepKernel : Kernel Expr Expr where
-  toFun    := step
+  toFun    := Untyped.step
   measurable' := step_is_measurable
 
 /-- For typed inputs, `stepKernel` is subprobability. -/
