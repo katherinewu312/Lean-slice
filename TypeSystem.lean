@@ -44,6 +44,9 @@ inductive HasType : Ctx → Expr → Ty → Prop where
   | discrete {Γ : Ctx} {ps : DiscreteProbs} :
       HasType Γ (.discrete ps) (.fin ps.1.length)
 
+  | diverge {Γ : Ctx} {τ : Ty} :
+      HasType Γ .diverge τ
+
   | letE {Γ : Ctx} {x : String} {e1 e2 : Expr} {τ1 τ2 : Ty} :
       HasType Γ e1 τ1 →
       HasType (Ctx.extend Γ x τ1) e2 τ2 →

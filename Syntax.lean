@@ -21,6 +21,7 @@ inductive Expr where
   | falseE    : Expr
   | finconst  : (n : ℕ) → Fin n → Expr
   | discrete  : DiscreteProbs → Expr
+  | diverge   : Expr
   | letE      : String → Expr → Expr → Expr
   | lt        : Expr → Expr → Expr
   | ifE       : Expr → Expr → Expr → Expr
@@ -81,6 +82,7 @@ partial def subst (x : String) (v : Expr) : Expr → Expr
   | .falseE         => .falseE
   | .finconst n k   => .finconst n k
   | .discrete ps    => .discrete ps
+  | .diverge        => .diverge
   | .letE y e1 e2   =>
       if x = y then .letE y (subst x v e1) e2
       else .letE y (subst x v e1) (subst x v e2)

@@ -16,6 +16,7 @@ inductive Skeleton : Type where
   | falseE : Skeleton
   | finconst : (n : ℕ) → Fin n → Skeleton
   | discrete : DiscreteProbs → Skeleton
+  | diverge : Skeleton
   | lt : Skeleton → Skeleton → Skeleton
   | ifE : Skeleton → Skeleton → Skeleton → Skeleton
   | letE : String → Skeleton → Skeleton → Skeleton
@@ -30,6 +31,7 @@ def numHoles : Skeleton → ℕ
   | .falseE => 0
   | .finconst _ _ => 0
   | .discrete _ => 0
+  | .diverge => 0
   | .lt s1 s2 => numHoles s1 + numHoles s2
   | .ifE s1 s2 s3 => numHoles s1 + (numHoles s2 + numHoles s3)
   | .letE _ s1 s2 => numHoles s1 + numHoles s2
@@ -49,6 +51,8 @@ def fillSkeleton : (s : Skeleton) → (Fin (numHoles s) → ℝ) → Expr
       .finconst n k
   | .discrete ps, _ =>
       .discrete ps
+  | .diverge, _ =>
+      .diverge
   | .lt s1 s2, v =>
       let v1 : Fin (numHoles s1) → ℝ := fun i => v (Fin.castAdd (numHoles s2) i)
       let v2 : Fin (numHoles s2) → ℝ := fun i => v (Fin.natAdd (numHoles s1) i)
@@ -78,6 +82,7 @@ def skeletonOf : Expr → Skeleton
   | .falseE          => .falseE
   | .finconst n k    => .finconst n k
   | .discrete ps     => .discrete ps
+  | .diverge         => .diverge
   | .lt   e₁ e₂     => .lt   (skeletonOf e₁) (skeletonOf e₂)
   | .ifE  e₁ e₂ e₃  => .ifE  (skeletonOf e₁) (skeletonOf e₂) (skeletonOf e₃)
   | .letE x e₁ e₂  => .letE x (skeletonOf e₁) (skeletonOf e₂)
@@ -96,6 +101,8 @@ def holeValues : (e : Expr) → Fin (numHoles (skeletonOf e)) → ℝ
   | .finconst _ _ =>
       Fin.elim0
   | .discrete _ =>
+      Fin.elim0
+  | .diverge =>
       Fin.elim0
   | .lt e₁ e₂ =>
       by
@@ -139,6 +146,8 @@ theorem fillSkeleton_holeValues (e : Expr) :
       simp [fillSkeleton, skeletonOf, holeValues]
   | discrete ps =>
       simp [fillSkeleton, skeletonOf, holeValues]
+  | diverge =>
+      simp [fillSkeleton, skeletonOf, holeValues]
   | lt e₁ e₂ ih₁ ih₂ =>
       simp [fillSkeleton, skeletonOf, holeValues, ih₁, ih₂]
   | ifE e₁ e₂ e₃ ih₁ ih₂ ih₃ =>
@@ -163,6 +172,8 @@ theorem skeletonOf_fillSkeleton (σ : Skeleton) (v : Fin (numHoles σ) → ℝ) 
   | finconst n k =>
       simp [fillSkeleton, skeletonOf]
   | discrete ps =>
+      simp [fillSkeleton, skeletonOf]
+  | diverge =>
       simp [fillSkeleton, skeletonOf]
   | lt s₁ s₂ ih₁ ih₂ =>
       simp [fillSkeleton, skeletonOf, ih₁, ih₂]
@@ -203,6 +214,9 @@ theorem fillSkeleton_injective (σ : Skeleton) :
       funext i
       exact Fin.elim0 i
   | discrete ps =>
+      funext i
+      exact Fin.elim0 i
+  | diverge =>
       funext i
       exact Fin.elim0 i
   | lt s₁ s₂ ih₁ ih₂ =>
@@ -401,92 +415,6 @@ instance expr_measurableSingletonClass : MeasurableSingletonClass Expr where
       have hmeas : MeasurableSet (∅ : Set (ExprsOfSkel σ)) := MeasurableSet.empty
       exact hset ▸ hmeas
 
-/-- Transport the Euclidean topology on `Fin (numHoles σ) → ℝ` across the
-    bijection `exprsOfSkel_equiv σ` to get a topology on `ExprsOfSkel σ`. -/
-noncomputable instance exprsOfSkel_topologicalSpace (σ : Skeleton) :
-    TopologicalSpace (ExprsOfSkel σ) :=
-  TopologicalSpace.induced (exprsOfSkel_equiv σ) inferInstance
-
-noncomputable instance exprsOfSkel_t1Space (σ : Skeleton) :
-    T1Space (ExprsOfSkel σ) :=
-  (exprsOfSkel_equiv σ).injective.isEmbedding_induced.t1Space
-
-/-- The disjoint-union topology on `Expr`:
-    a set `S` is open iff for every skeleton `σ`, the slice
-    `{ p : ExprsOfSkel σ | p.1 ∈ S }` is open in `ExprsOfSkel σ`. -/
-instance expr_topologicalSpace : TopologicalSpace Expr where
-  IsOpen S :=
-    ∀ σ : Skeleton,
-      IsOpen { p : ExprsOfSkel σ | p.1 ∈ S }
-  isOpen_univ := by
-    intro σ
-    simp
-  isOpen_inter := by
-    intro S T hS hT σ
-    have hSσ : IsOpen { p : ExprsOfSkel σ | p.1 ∈ S } := hS σ
-    have hTσ : IsOpen { p : ExprsOfSkel σ | p.1 ∈ T } := hT σ
-    have hEq :
-        { p : ExprsOfSkel σ | p.1 ∈ S ∩ T } =
-          ({ p : ExprsOfSkel σ | p.1 ∈ S } ∩ { p : ExprsOfSkel σ | p.1 ∈ T }) := by
-      ext p
-      simp
-    rw [hEq]
-    exact hSσ.inter hTσ
-  isOpen_sUnion := by
-    intro 𝒮 h𝒮 σ
-    have hEq :
-        { p : ExprsOfSkel σ | p.1 ∈ ⋃₀ 𝒮 } =
-          ⋃ s ∈ 𝒮, ({ p : ExprsOfSkel σ | p.1 ∈ s } : Set (ExprsOfSkel σ)) := by
-      ext p
-      simp [Set.mem_sUnion]
-    rw [hEq]
-    exact isOpen_iUnion (fun s => isOpen_iUnion (fun hs => h𝒮 s hs σ))
-
-instance expr_t1Space : T1Space Expr := by
-  refine t1Space_iff_exists_open.2 ?_
-  intro x y hxy
-  refine ⟨({y}ᶜ : Set Expr), ?_, by simpa using hxy, by simp⟩
-  intro σ
-  by_cases hs : skeletonOf y = σ
-  · let py : ExprsOfSkel σ := ⟨y, hs⟩
-    have hset :
-        { p : ExprsOfSkel σ | p.1 ∈ ({y}ᶜ : Set Expr) } =
-          (({py} : Set (ExprsOfSkel σ))ᶜ) := by
-      ext p
-      constructor
-      · intro hp
-        intro hp'
-        rcases Set.mem_singleton_iff.mp hp' with hp'
-        apply hp
-        exact congrArg Subtype.val hp'
-      · intro hp
-        have hp' : p ≠ py := by
-          simpa [Set.mem_compl_iff, Set.mem_singleton_iff] using hp
-        have hpy : p.1 ≠ y := by
-          intro hpe
-          apply hp'
-          apply Subtype.ext
-          simpa [py, hpe]
-        simpa [Set.mem_compl_iff, Set.mem_singleton_iff] using hpy
-    rw [hset]
-    exact isOpen_compl_iff.mpr isClosed_singleton
-  · have hset :
-        { p : ExprsOfSkel σ | p.1 ∈ ({y}ᶜ : Set Expr) } =
-          (Set.univ : Set (ExprsOfSkel σ)) := by
-      ext p
-      constructor
-      · intro _
-        simp
-      · intro _
-        have hpy : p.1 ≠ y := by
-          intro hpe
-          have : skeletonOf y = σ := by
-            simpa [hpe] using p.2
-          exact (hs this).elim
-        simpa [Set.mem_compl_iff, Set.mem_singleton_iff] using hpy
-    rw [hset]
-    simp
-
 end Untyped
 
 -- ---------------------------------------------------------------------------
@@ -513,6 +441,9 @@ inductive HasTypeSkel : Ctx → Untyped.Skeleton → Ty → Prop where
 
   | discrete {Γ : Ctx} {ps : DiscreteProbs} :
       HasTypeSkel Γ (.discrete ps) (.fin ps.1.length)
+
+  | diverge {Γ : Ctx} {τ : Ty} :
+      HasTypeSkel Γ .diverge τ
 
   | letE {Γ : Ctx} {x : String} {s1 s2 : Untyped.Skeleton} {τ1 τ2 : Ty} :
       HasTypeSkel Γ s1 τ1 →
@@ -566,6 +497,9 @@ lemma fillSkeleton_preserves_type {Γ : Ctx} {s : Untyped.Skeleton} {τ : Ty}
   | discrete =>
       intro v
       simpa [Untyped.fillSkeleton] using (HasType.discrete)
+  | diverge =>
+      intro v
+      simpa [Untyped.fillSkeleton] using (HasType.diverge)
   | letE hs1 hs2 ih1 ih2 =>
       intro v
       simpa [Untyped.fillSkeleton] using
@@ -614,6 +548,8 @@ lemma hasTypeSkel_of_hasType {Γ : Ctx} {e : Expr} {τ : Ty}
       exact HasTypeSkel.finconst k
   | discrete =>
       exact HasTypeSkel.discrete
+  | diverge =>
+      exact HasTypeSkel.diverge
   | letE h1 h2 ih1 ih2 =>
       simpa [Untyped.skeletonOf] using HasTypeSkel.letE ih1 ih2
   | lt h1 h2 ih1 ih2 =>
@@ -695,17 +631,5 @@ noncomputable instance exprsOfSkel_measurableSpace {τ : Ty} (σ : SkeletonsOfTy
 noncomputable instance exprsOfType_measurableSpace (τ : Ty) :
     MeasurableSpace (ExprsOfType τ) :=
   MeasurableSpace.comap (fun ⟨e, _⟩ => e) Untyped.expr_measurableSpace
-
--- ---------------------------------------------------------------------------
--- Topology on well-typed expressions
--- ---------------------------------------------------------------------------
-
-noncomputable instance exprsOfType_topologicalSpace (τ : Ty) :
-    TopologicalSpace (ExprsOfType τ) :=
-  TopologicalSpace.induced (fun x : ExprsOfType τ => x.1) inferInstance
-
-noncomputable instance exprsOfSkel_topologicalSpace {τ : Ty} (σ : SkeletonsOfType τ) :
-    TopologicalSpace (ExprsOfSkel σ) :=
-  TopologicalSpace.induced (exprsOfSkel_equiv σ) inferInstance
 
 end Slice
