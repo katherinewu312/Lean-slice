@@ -240,15 +240,6 @@ lemma step_preserves_type_ae {τ : Ty} {e : Expr}
           (hp := hMeas .real)
           (ih1.mono (fun g hg => HasType.uniform hg h2))
 
-
-/-- IRRELEVANT: Preservation: If e has type τ, and e' lies in the support of one small-step of e, then e' also has type τ. -/
-lemma step_preserves_type_strong {τ : Ty} {e : Expr}
-    [TopologicalSpace Expr]
-    (he : HasType Ctx.empty e τ) (e' : Expr)
-    (hstep : e' ∈ (Untyped.step e).support) :
-    HasType Ctx.empty e' τ := by
-  sorry
-
 -- ---------------------------------------------------------------------------
 -- Small-step semantics is a Markov kernel.
 -- 1. Subprobability measure
@@ -689,25 +680,8 @@ lemma step_lt_slice_measurable
         cases h2 : Untyped.fillSkeleton s2 (v2 v) with
         | const r =>
             exact (False.elim (hnot2 ⟨r, h2⟩))
-        | var x =>
-            simpa [Untyped.fillSkeleton, i0]
-        | trueE =>
-            simpa [Untyped.fillSkeleton, i0]
-        | falseE =>
-            simpa [Untyped.fillSkeleton, i0]
-        | finconst n k =>
-            simpa [Untyped.fillSkeleton, i0]
-        | discrete ps =>
-            simpa [Untyped.fillSkeleton, i0]
-        | diverge =>
-            simpa [Untyped.fillSkeleton, i0]
-        | letE x e1 e2 =>
-            simpa [Untyped.fillSkeleton, i0]
-        | lt e1 e2 =>
-            simpa [Untyped.fillSkeleton, i0]
-        | ifE c t f =>
-            simpa [Untyped.fillSkeleton, i0]
-        | uniform e1 e2 =>
+        | var _ | trueE | falseE | finconst _ _ | discrete _ | diverge
+          | letE _ _ _ | lt _ _ | ifE _ _ _ | uniform _ _ =>
             simpa [Untyped.fillSkeleton, i0]
       rw [hEq]
       let μ : α → Measure Expr := fun v => Untyped.step (Untyped.fillSkeleton s2 (v2 v))
@@ -842,23 +816,8 @@ lemma step_if_slice_measurable
             exact (False.elim (hnt h1))
         | falseE =>
             exact (False.elim (hnf h1))
-        | var x =>
-            simp [h1]
-        | const r =>
-            simp [h1]
-        | finconst n k =>
-            simp [h1]
-        | discrete ps =>
-            simp [h1]
-        | diverge =>
-            simp [h1]
-        | letE x e1 e2 =>
-            simp [h1]
-        | lt e1 e2 =>
-            simp [h1]
-        | ifE c t f =>
-            simp [h1]
-        | uniform e1 e2 =>
+        | var _ | const _ | finconst _ _ | discrete _ | diverge
+          | letE _ _ _ | lt _ _ | ifE _ _ _ | uniform _ _ =>
             simp [h1]
       rw [hEq]
       let μ : α → Measure Expr := fun v => Untyped.step (Untyped.fillSkeleton s1 (v1 v))
@@ -880,8 +839,7 @@ lemma step_if_slice_measurable
 
 lemma step_let_slice_measurable
     (x : String) (s1 s2 : Untyped.Skeleton)
-    (ih1 : Measurable (fun v : Fin (Untyped.numHoles s1) → ℝ => Untyped.step (Untyped.fillSkeleton s1 v)))
-    (ih2 : Measurable (fun v : Fin (Untyped.numHoles s2) → ℝ => Untyped.step (Untyped.fillSkeleton s2 v))) :
+    (ih1 : Measurable (fun v : Fin (Untyped.numHoles s1) → ℝ => Untyped.step (Untyped.fillSkeleton s1 v))) :
     Measurable (fun v : Fin (Untyped.numHoles s1 + Untyped.numHoles s2) → ℝ =>
       if isValue (Untyped.fillSkeleton s1 (fun i => v (Fin.castAdd (Untyped.numHoles s2) i)) ) then
         Dist.ret
@@ -1049,25 +1007,8 @@ lemma step_uniform_slice_measurable
         cases h2 : Untyped.fillSkeleton s2 (v2 v) with
         | const r =>
             exact (False.elim (hnot2 ⟨r, h2⟩))
-        | var x =>
-            simpa [Untyped.fillSkeleton, i0]
-        | trueE =>
-            simpa [Untyped.fillSkeleton, i0]
-        | falseE =>
-            simpa [Untyped.fillSkeleton, i0]
-        | finconst n k =>
-            simpa [Untyped.fillSkeleton, i0]
-        | discrete ps =>
-            simpa [Untyped.fillSkeleton, i0]
-        | diverge =>
-            simpa [Untyped.fillSkeleton, i0]
-        | letE x e1 e2 =>
-            simpa [Untyped.fillSkeleton, i0]
-        | lt e1 e2 =>
-            simpa [Untyped.fillSkeleton, i0]
-        | ifE c t f =>
-            simpa [Untyped.fillSkeleton, i0]
-        | uniform e1 e2 =>
+        | var _ | trueE | falseE | finconst _ _ | discrete _ | diverge
+          | letE _ _ _ | lt _ _ | ifE _ _ _ | uniform _ _ =>
             simpa [Untyped.fillSkeleton, i0]
       rw [hEq]
       let μ : α → Measure Expr := fun v => Untyped.step (Untyped.fillSkeleton s2 (v2 v))
@@ -1154,9 +1095,9 @@ lemma step_untyped_measurable :
   | ifE s1 s2 s3 ih1 ih2 ih3 =>
       simpa [Untyped.step, Untyped.fillSkeleton] using
         step_if_slice_measurable s1 s2 s3 ih1 ih2 ih3
-  | letE x s1 s2 ih1 ih2 =>
+  | letE x s1 s2 ih1 _ =>
       simpa [Untyped.step, Untyped.fillSkeleton] using
-        step_let_slice_measurable x s1 s2 ih1 ih2
+        step_let_slice_measurable x s1 s2 ih1
   | uniform s1 s2 ih1 ih2 =>
       simpa [Untyped.step, Untyped.fillSkeleton] using
         step_uniform_slice_measurable s1 s2 ih1 ih2
