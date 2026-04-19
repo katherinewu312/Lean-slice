@@ -1,4 +1,7 @@
 import Mathlib.Probability.Kernel.Defs
+import Mathlib.Probability.Kernel.Composition.MapComap
+import Mathlib.Probability.Kernel.Composition.CompProd
+import Mathlib.Probability.Kernel.Composition.Prod
 import Mathlib.MeasureTheory.Measure.Support
 import Syntax
 import Monad
@@ -240,69 +243,11 @@ lemma step_preserves_type_ae {τ : Ty} {e : Expr}
 
 /-- IRRELEVANT: Preservation: If e has type τ, and e' lies in the support of one small-step of e, then e' also has type τ. -/
 lemma step_preserves_type_strong {τ : Ty} {e : Expr}
+    [TopologicalSpace Expr]
     (he : HasType Ctx.empty e τ) (e' : Expr)
     (hstep : e' ∈ (Untyped.step e).support) :
     HasType Ctx.empty e' τ := by
-  cases he with
-  | diverge =>
-      simp [Untyped.step, Measure.support_zero] at hstep
-  | const | trueE | falseE | finconst =>
-      simp [Untyped.step, Dist.ret_is_dirac, Measure.support_dirac] at hstep
-      simpa [hstep] using (HasType.diverge (Γ := Ctx.empty))
-  | var hx =>
-      exfalso
-      simp [Ctx.empty] at hx
-  | discrete =>
-      simp [Untyped.step, Dist.ret_is_dirac] at hstep
-      rcases hstep with ⟨i, _, rfl⟩
-      exact HasType.finconst i
-  | letE h1 h2 =>
-      simp only [Untyped.step] at hstep
-      split_ifs at hstep with hv
-      · simp [Dist.ret_is_dirac, Measure.support_dirac] at hstep
-        simpa [hstep] using (subst_preserves_type h1 h2)
-      · simp [Dist.ret_is_dirac] at hstep
-        rcases hstep with ⟨g, hg, rfl⟩
-        exact HasType.letE (step_preserves_type_strong h1 g hg) h2
-  | lt h1 h2 =>
-      simp only [Untyped.step] at hstep
-      split at hstep
-      · split at hstep
-        · simp [Dist.ret_is_dirac, Measure.support_dirac] at hstep
-          simpa [hstep] using (HasType.trueE (Γ := Ctx.empty))
-        · simp [Dist.ret_is_dirac, Measure.support_dirac] at hstep
-          simpa [hstep] using (HasType.falseE (Γ := Ctx.empty))
-      · simp [Dist.ret_is_dirac] at hstep
-        rcases hstep with ⟨g, hg, rfl⟩
-        exact HasType.lt h1 (step_preserves_type_strong h2 g hg)
-      · simp [Dist.ret_is_dirac] at hstep
-        rcases hstep with ⟨g, hg, rfl⟩
-        exact HasType.lt (step_preserves_type_strong h1 g hg) h2
-  | ifE hc ht hf =>
-      simp only [Untyped.step] at hstep
-      split at hstep
-      · simp [Dist.ret_is_dirac, Measure.support_dirac] at hstep
-        simpa [hstep] using ht
-      · simp [Dist.ret_is_dirac, Measure.support_dirac] at hstep
-        simpa [hstep] using hf
-      · simp [Dist.ret_is_dirac] at hstep
-        rcases hstep with ⟨g, hg, rfl⟩
-        exact HasType.ifE (step_preserves_type_strong hc g hg) ht hf
-  | uniform h1 h2 =>
-      simp only [Untyped.step] at hstep
-      split at hstep
-      · split at hstep
-        · simp [Dist.ret_is_dirac] at hstep
-          rcases hstep with ⟨_, _, rfl⟩
-          exact HasType.const
-        · simp [Dist.ret_is_dirac, Measure.support_dirac] at hstep
-          simpa [hstep] using (HasType.diverge (Γ := Ctx.empty))
-      · simp [Dist.ret_is_dirac] at hstep
-        rcases hstep with ⟨g, hg, rfl⟩
-        exact HasType.uniform h1 (step_preserves_type_strong h2 g hg)
-      · simp [Dist.ret_is_dirac] at hstep
-        rcases hstep with ⟨g, hg, rfl⟩
-        exact HasType.uniform (step_preserves_type_strong h1 g hg) h2
+  sorry
 
 -- ---------------------------------------------------------------------------
 -- Small-step semantics is a Markov kernel.
@@ -310,65 +255,228 @@ lemma step_preserves_type_strong {τ : Ty} {e : Expr}
 -- 2. Measurable function
 -- ---------------------------------------------------------------------------
 
--- ---------------------------------------------------------------------------
--- 1. Subprobability measure
--- ---------------------------------------------------------------------------
-
--- Dirac.ret e is a subprobability measure.
-lemma ret_is_subprob_measure {α : Type} [MeasurableSpace α] (a : α) :
-    IsSubProbabilityMeasure (Dist.ret a) := by
-  unfold IsSubProbabilityMeasure
-  simp [Dist.ret_is_dirac]
-
--- Bind preserves subprobability measures.
-lemma bind_is_subprob_measure {α β : Type} [MeasurableSpace α] [MeasurableSpace β]
-    (μ : Measure α) (k : α → Measure β)
-    (hμ : IsSubProbabilityMeasure μ)
-    (hk : ∀ x, IsSubProbabilityMeasure (k x))
-    (hkm : Measurable k) :
-    IsSubProbabilityMeasure (Dist.bind μ k) := by
-  unfold IsSubProbabilityMeasure at hμ hk ⊢
-  rw [Dist.bind_is_measure_bind, Measure.bind_apply MeasurableSet.univ hkm.aemeasurable]
-  exact (lintegral_mono (fun a => hk a)).trans (by simp [hμ])
-
-lemma step_is_subprob_measure {τ : Ty} (e : ExprsOfType τ) :
-    IsSubProbabilityMeasure (step e) := by
-  sorry
-
--- ---------------------------------------------------------------------------
--- 2. Measurability
--- ---------------------------------------------------------------------------
--- Dist.ret ∘ f is measurable.
-lemma ret_comp_measurable {α β : Type} [MeasurableSpace α] [MeasurableSpace β]
-    {f : α → β} (hf : Measurable f) :
-    Measurable (fun e : α => (Dist.ret (f e) : Dist β)) := by
-  simpa [Dist.ret_is_dirac] using
-    (MeasureTheory.Measure.measurable_dirac.comp hf)
+/-- A sub-Markov kernel presented as a plain function `α → Measure β`. -/
+-- We need sub- Markov kernels because we have diverge.
+def IsSubMarkovKernel {α β : Type*}
+    [MeasurableSpace α] [MeasurableSpace β]
+    (K : α → Measure β) : Prop :=
+  Measurable K ∧ ∀ a, IsSubProbabilityMeasure (K a)
 
 
--- Substitution is measurable
-lemma subst_is_measurable (x : String) (body : Expr) :
-    Measurable (fun e : Expr => Dist.ret (subst x e body)) := by sorry
+/-- `ret ∘ f` is a sub-Markov kernel. -/
+lemma ret_is_subMarkovKernel
+    {α β : Type}
+    [MeasurableSpace α] [MeasurableSpace β]
+    {f : α → β}
+    (hf : Measurable f) :
+    IsSubMarkovKernel (fun a : α => (Dist.ret (f a) : Dist β)) := by
+  refine ⟨
+    (by
+      simpa [Dist.ret_is_dirac] using
+        (MeasureTheory.Measure.measurable_dirac.comp hf)),
+    (by
+      intro a
+      simp [IsSubProbabilityMeasure, Dist.ret_is_dirac])
+  ⟩
 
--- Bind preserves measurability.
-lemma bind_is_measurable {α β γ : Type*}
+/-- A constant measure-valued map is a sub-Markov kernel if the measure is subprobability. -/
+lemma const_is_subMarkovKernel
+    {α β : Type}
+    [MeasurableSpace α] [MeasurableSpace β]
+    {μ : Measure β}
+    (hμ : IsSubProbabilityMeasure μ) :
+    IsSubMarkovKernel (fun _ : α => μ) := by
+  exact ⟨measurable_const, fun _ => hμ⟩
+
+/-- General bind closure for sub-Markov kernels. -/
+lemma bind_preserves_subMarkovKernel
+    {α β γ : Type}
     [MeasurableSpace α] [MeasurableSpace β] [MeasurableSpace γ]
-    {f : α → Measure β} {k : β → Measure γ}
-    (hf : Measurable f) (hk : Measurable k) :
-    Measurable (fun x => (f x).bind k) := by
-  exact (MeasureTheory.Measure.measurable_bind' hk).comp hf
+    {μ : α → Measure β}
+    [∀ a, SFinite (μ a)]
+    {κ : α → β → Measure γ}
+    (hμ : IsSubMarkovKernel μ)
+    (hκ_meas : Measurable (Function.uncurry κ))
+    (hκ_sub : ∀ a b, IsSubProbabilityMeasure (κ a b)) :
+    IsSubMarkovKernel
+      (fun a : α => (Dist.bind (μ a) (κ a) : Dist γ)) := by
+  rcases hμ with ⟨hμ_meas, hμ_sub⟩
+  let μK : Kernel α β := ⟨μ, hμ_meas⟩
+  let κK : Kernel (α × β) γ := ⟨Function.uncurry κ, hκ_meas⟩
+  have hμK_fin : IsFiniteKernel μK := by
+    refine ⟨⟨1, by simp, by
+      intro a
+      exact hμ_sub a⟩⟩
+  letI : IsFiniteKernel μK := hμK_fin
+  letI : IsSFiniteKernel μK := inferInstance
+  have hbind_meas :
+      Measurable (fun a : α => (Dist.bind (μ a) (κ a) : Dist γ)) := by
+    let K : Kernel α γ := κK ∘ₖ Kernel.prod Kernel.id μK
+    have hEq :
+        (fun a : α => (Dist.bind (μ a) (κ a) : Dist γ)) =
+          (fun a : α => (K a : Measure γ)) := by
+      funext a
+      ext s hs
+      calc
+        (Dist.bind (μ a) (κ a)) s
+            = ∫⁻ b, κ a b s ∂(μ a) := by
+              rw [Dist.bind_is_measure_bind, Measure.bind_apply hs]
+              exact (Measurable.of_uncurry_left (f := κ) hκ_meas (x := a)).aemeasurable
+        _ = ((κK ∘ₖ Kernel.prod Kernel.id μK) a) s := by
+              symm
+              rw [Kernel.comp_apply' (η := κK)
+                (κ := Kernel.prod Kernel.id μK) (a := a) (hs := hs)]
+              rw [Kernel.lintegral_id_prod (κ := μK) (a := a)
+                (f := fun p : α × β => κK p s) (hf := Kernel.measurable_coe κK hs)]
+              simp [μK, κK, Function.uncurry]
+        _ = K a s := rfl
+    rw [hEq]
+    exact Kernel.measurable K
+  refine ⟨hbind_meas, by
+    intro a
+    unfold IsSubProbabilityMeasure
+    change (Dist.bind (μ a) (κ a) Set.univ ≤ 1)
+    rw [Dist.bind_is_measure_bind, Measure.bind_apply MeasurableSet.univ]
+    · calc
+        ∫⁻ b, κ a b Set.univ ∂(μ a)
+            ≤ ∫⁻ b, 1 ∂(μ a) := lintegral_mono (fun b => hκ_sub a b)
+        _ = (μ a) Set.univ := by simp
+        _ ≤ 1 := hμ_sub a
+    · exact (Measurable.of_uncurry_left (f := κ) hκ_meas (x := a)).aemeasurable
+  ⟩
 
-/-- Typed step is measurable. -/
-lemma step_is_measurable (τ : Ty) : Measurable (step (τ := τ)) := by
+/-- Specialization of bind closure when the RHS is `ret (f a b)`. -/
+lemma bind_ret_preserves_subMarkovKernel
+    {α β γ : Type}
+    [MeasurableSpace α] [MeasurableSpace β] [MeasurableSpace γ]
+    {μ : α → Measure β}
+    [∀ a, SFinite (μ a)]
+    (hμ : IsSubMarkovKernel μ)
+    {f : α → β → γ}
+    (hf : Measurable (Function.uncurry f)) :
+    IsSubMarkovKernel
+      (fun a : α => (Dist.bind (μ a) (fun b => Dist.ret (f a b)) : Dist γ)) := by
+  refine bind_preserves_subMarkovKernel
+    (μ := μ)
+    (κ := fun a b => Dist.ret (f a b))
+    hμ
+    (by
+      simpa [Function.uncurry, Dist.ret_is_dirac] using
+        (MeasureTheory.Measure.measurable_dirac.comp hf))
+    (by
+      intro a b
+      simp [IsSubProbabilityMeasure, Dist.ret_is_dirac])
+
+
+
+
+-- Continuation of bind is a Markov kernel.
+lemma discrete_rhs_kernel (n : Nat) :
+    IsSubMarkovKernel
+      (fun i : Fin n => (Dist.ret (Expr.finconst n i) : Dist Expr)) := by
   sorry
 
-noncomputable def stepKernel (τ : Ty) : Kernel (ExprsOfType τ) (ExprsOfType τ) where
-  toFun    := step
-  measurable' := step_is_measurable τ
+lemma let_rhs_kernel (x : String) (e2 : Expr) :
+    IsSubMarkovKernel
+      (fun g : Expr => (Dist.ret (Expr.letE x g e2) : Dist Expr)) := by
+  sorry
 
-/-- For typed inputs, `stepKernel` is subprobability. -/
-theorem stepKernel_subprob_on_welltyped {τ : Ty} (e : ExprsOfType τ) :
-    IsSubProbabilityMeasure (stepKernel τ e) := by
-  simpa [stepKernel] using step_is_subprob_measure e
+lemma if_rhs_kernel (t f : Expr) :
+    IsSubMarkovKernel
+      (fun g : Expr => (Dist.ret (Expr.ifE g t f) : Dist Expr)) := by
+  sorry
+
+lemma lt_left_rhs_kernel (e2 : Expr) :
+    IsSubMarkovKernel
+      (fun g : Expr => (Dist.ret (Expr.lt g e2) : Dist Expr)) := by
+  sorry
+
+lemma lt_right_rhs_kernel (v1 : ℝ) :
+    IsSubMarkovKernel
+      (fun g : Expr => (Dist.ret (Expr.lt (.const v1) g) : Dist Expr)) := by
+  sorry
+
+lemma uniform_left_rhs_kernel (e2 : Expr) :
+    IsSubMarkovKernel
+      (fun g : Expr => (Dist.ret (Expr.uniform g e2) : Dist Expr)) := by
+  sorry
+
+lemma uniform_right_rhs_kernel (v1 : ℝ) :
+    IsSubMarkovKernel
+      (fun g : Expr => (Dist.ret (Expr.uniform (.const v1) g) : Dist Expr)) := by
+  sorry
+
+lemma const_sample_rhs_kernel :
+    IsSubMarkovKernel
+      (fun r : ℝ => (Dist.ret (Expr.const r) : Dist Expr)) := by
+  sorry
+
+
+-- If K : Expr → Measure Expr is already a sub-Markov kernel for stepping a subexpression, then plugging that stepped subexpression back into a larger expression form still gives a sub-Markov kernel.
+lemma let_clause_kernel
+    {K : Expr → Measure Expr}
+    (hK : IsSubMarkovKernel K)
+    (x : String) (e2 : Expr) :
+    IsSubMarkovKernel
+      (fun e1 : Expr =>
+        if isValue e1 then
+          (Dist.ret (subst x e1 e2) : Dist Expr)
+        else
+          Dist.bind (K e1) (fun g => Dist.ret (Expr.letE x g e2))) := by
+  sorry
+
+lemma if_clause_kernel
+    {K : Expr → Measure Expr}
+    (hK : IsSubMarkovKernel K)
+    (t f : Expr) :
+    IsSubMarkovKernel
+      (fun c : Expr =>
+        match c with
+        | .trueE  => Dist.ret t
+        | .falseE => Dist.ret f
+        | _       => Dist.bind (K c) (fun g => Dist.ret (Expr.ifE g t f))) := by
+  sorry
+
+lemma lt_left_clause_kernel
+    {K : Expr → Measure Expr}
+    (hK : IsSubMarkovKernel K)
+    (e2 : Expr) :
+    IsSubMarkovKernel
+      (fun e1 : Expr =>
+        Dist.bind (K e1) (fun g => Dist.ret (Expr.lt g e2))) := by
+  sorry
+
+lemma lt_right_clause_kernel
+    {K : Expr → Measure Expr}
+    (hK : IsSubMarkovKernel K)
+    (v1 : ℝ) :
+    IsSubMarkovKernel
+      (fun e2 : Expr =>
+        Dist.bind (K e2) (fun g => Dist.ret (Expr.lt (.const v1) g))) := by
+  sorry
+
+lemma uniform_left_clause_kernel
+    {K : Expr → Measure Expr}
+    (hK : IsSubMarkovKernel K)
+    (e2 : Expr) :
+    IsSubMarkovKernel
+      (fun e1 : Expr =>
+        Dist.bind (K e1) (fun g => Dist.ret (Expr.uniform g e2))) := by
+  sorry
+
+lemma uniform_right_clause_kernel
+    {K : Expr → Measure Expr}
+    (hK : IsSubMarkovKernel K)
+    (v1 : ℝ) :
+    IsSubMarkovKernel
+      (fun e2 : Expr =>
+        Dist.bind (K e2) (fun g => Dist.ret (Expr.uniform (.const v1) g))) := by
+  sorry
+
+
+
+lemma step_untyped_is_subMarkovKernel :
+    IsSubMarkovKernel (fun e : Expr => Untyped.step e) := by
+  sorry
 
 end Slice

@@ -632,4 +632,9 @@ noncomputable instance exprsOfType_measurableSpace (τ : Ty) :
     MeasurableSpace (ExprsOfType τ) :=
   MeasurableSpace.comap (fun ⟨e, _⟩ => e) Untyped.expr_measurableSpace
 
+lemma measurable_of_slices {β : Type} [MeasurableSpace β] {f : Expr → β}
+    (h : ∀ σ : Untyped.Skeleton,
+      Measurable (fun v : Fin (Untyped.numHoles σ) → ℝ => f (Untyped.fillSkeleton σ v))) :
+    Measurable f := by sorry
+
 end Slice
