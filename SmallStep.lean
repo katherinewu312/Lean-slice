@@ -6,7 +6,7 @@ import Mathlib.MeasureTheory.Measure.Support
 import Syntax
 import Monad
 import Skeleton
-import Topology
+import Measurable
 import TypeSystem
 
 namespace Slice
@@ -253,257 +253,125 @@ def IsSubMarkovKernel {α β : Type*}
     (K : α → Measure β) : Prop :=
   Measurable K ∧ ∀ a, IsSubProbabilityMeasure (K a)
 
+-- ---------------------------------------------------------------------------
+-- 1. Subprobability measure
+-- ---------------------------------------------------------------------------
 
-/-- `ret ∘ f` is a sub-Markov kernel. -/
-lemma ret_is_subMarkovKernel
-    {α β : Type}
-    [MeasurableSpace α] [MeasurableSpace β]
-    {f : α → β}
-    (hf : Measurable f) :
-    IsSubMarkovKernel (fun a : α => (Dist.ret (f a) : Dist β)) := by
-  refine ⟨
-    (by
-      simpa [Dist.ret_is_dirac] using
-        (MeasureTheory.Measure.measurable_dirac.comp hf)),
-    (by
-      intro a
-      simp [IsSubProbabilityMeasure, Dist.ret_is_dirac])
-  ⟩
+-- Dirac.ret e is a subprobability measure.
+lemma ret_is_subprob_measure {α : Type} [MeasurableSpace α] (a : α) :
+    IsSubProbabilityMeasure (Dist.ret a) := by
+  unfold IsSubProbabilityMeasure
+  simp [Dist.ret_is_dirac]
 
-/-- A constant measure-valued map is a sub-Markov kernel if the measure is subprobability. -/
-lemma const_is_subMarkovKernel
-    {α β : Type}
-    [MeasurableSpace α] [MeasurableSpace β]
-    {μ : Measure β}
-    (hμ : IsSubProbabilityMeasure μ) :
-    IsSubMarkovKernel (fun _ : α => μ) := by
-  exact ⟨measurable_const, fun _ => hμ⟩
+-- Bind preserves subprobability measures.
+-- If μ is a subprobability measure and k is a subprobability measure, then μ >>= k is a subprobability measure.
+lemma bind_is_subprob_measure {α β : Type} [MeasurableSpace α] [MeasurableSpace β]
+    (μ : Measure α) (k : α → Measure β)
+    (hμ : IsSubProbabilityMeasure μ)
+    (hk : ∀ x, IsSubProbabilityMeasure (k x))
+    (hkm : Measurable k) :
+    IsSubProbabilityMeasure (Dist.bind μ k) := by
+  unfold IsSubProbabilityMeasure at hμ hk ⊢
+  rw [Dist.bind_is_measure_bind, Measure.bind_apply MeasurableSet.univ hkm.aemeasurable]
+  exact (lintegral_mono (fun a => hk a)).trans (by simp [hμ])
 
--- General bind closure for sub-Markov kernels.
-lemma bind_preserves_subMarkovKernel
-    {α β γ : Type}
-    [MeasurableSpace α] [MeasurableSpace β] [MeasurableSpace γ]
-    {μ : α → Measure β}
-    [∀ a, SFinite (μ a)]
-    {κ : α → β → Measure γ}
-    (hμ : IsSubMarkovKernel μ)
-    (hκ : IsSubMarkovKernel (Function.uncurry κ)) :
-    IsSubMarkovKernel
-      (fun a : α => (Dist.bind (μ a) (κ a) : Dist γ)) := by
-  rcases hμ with ⟨hμ_meas, hμ_sub⟩
-  rcases hκ with ⟨hκ_meas, hκ_sub'⟩
-  have hκ_sub : ∀ a b, IsSubProbabilityMeasure (κ a b) := fun a b => hκ_sub' (a, b)
-  let μK : Kernel α β := ⟨μ, hμ_meas⟩
-  let κK : Kernel (α × β) γ := ⟨Function.uncurry κ, hκ_meas⟩
-  have hμK_fin : IsFiniteKernel μK := by
-    refine ⟨⟨1, by simp, by intro a; exact hμ_sub a⟩⟩
-  letI : IsFiniteKernel μK := hμK_fin
-  letI : IsSFiniteKernel μK := inferInstance
-  have hbind_meas :
-      Measurable (fun a : α => (Dist.bind (μ a) (κ a) : Dist γ)) := by
-    let K : Kernel α γ := κK ∘ₖ Kernel.prod Kernel.id μK
-    have hEq :
-        (fun a : α => (Dist.bind (μ a) (κ a) : Dist γ)) =
-          (fun a : α => (K a : Measure γ)) := by
-      funext a
-      ext s hs
-      calc
-        (Dist.bind (μ a) (κ a)) s
-            = ∫⁻ b, κ a b s ∂(μ a) := by
-              rw [Dist.bind_is_measure_bind, Measure.bind_apply hs]
-              exact (Measurable.of_uncurry_left (f := κ) hκ_meas (x := a)).aemeasurable
-        _ = ((κK ∘ₖ Kernel.prod Kernel.id μK) a) s := by
-              symm
-              rw [Kernel.comp_apply' (η := κK)
-                (κ := Kernel.prod Kernel.id μK) (a := a) (hs := hs)]
-              rw [Kernel.lintegral_id_prod (κ := μK) (a := a)
-                (f := fun p : α × β => κK p s) (hf := Kernel.measurable_coe κK hs)]
-              simp [μK, κK, Function.uncurry]
-        _ = K a s := rfl
-    rw [hEq]
-    exact Kernel.measurable K
-  refine ⟨hbind_meas, by
-    intro a
-    unfold IsSubProbabilityMeasure
-    change (Dist.bind (μ a) (κ a) Set.univ ≤ 1)
-    rw [Dist.bind_is_measure_bind, Measure.bind_apply MeasurableSet.univ]
-    · calc
-        ∫⁻ b, κ a b Set.univ ∂(μ a)
-            ≤ ∫⁻ b, 1 ∂(μ a) := lintegral_mono (fun b => hκ_sub a b)
-        _ = (μ a) Set.univ := by simp
-        _ ≤ 1 := hμ_sub a
-    · exact (Measurable.of_uncurry_left (f := κ) hκ_meas (x := a)).aemeasurable
-  ⟩
+-- Small-step semantics is a subprobability measure.
+lemma step_untyped_is_subprob_measure (e : Expr) :
+    IsSubProbabilityMeasure (Untyped.step e) := by
+  induction e with
+  | diverge =>
+      unfold IsSubProbabilityMeasure
+      simp [Untyped.step]
+  | const _ | finconst _ _ | trueE | falseE | var _ =>
+      simp only [Untyped.step]
+      exact ret_is_subprob_measure _
+  | discrete ps =>
+      simp only [Untyped.step]
+      apply bind_is_subprob_measure
+      · unfold IsSubProbabilityMeasure
+        simpa [Dist.ret_is_dirac, ps.2] using (le_rfl : (1 : ENNReal) ≤ 1)
+      · intro i; exact ret_is_subprob_measure _
+      · simpa [Dist.ret_is_dirac] using
+          MeasureTheory.Measure.measurable_dirac.comp (finconst_wrap_measurable _)
+  | letE x e1 e2 ih1 _ =>
+      simp only [Untyped.step]
+      split_ifs
+      · exact ret_is_subprob_measure _
+      · exact bind_is_subprob_measure _ _ ih1
+          (fun _ => ret_is_subprob_measure _)
+          (by simpa [Dist.ret_is_dirac] using
+            MeasureTheory.Measure.measurable_dirac.comp (let_wrap_measurable x e2))
+  | lt e1 e2 ih1 ih2 =>
+      simp only [Untyped.step]
+      split
+      · split
+        · exact ret_is_subprob_measure _
+        · exact ret_is_subprob_measure _
+      · exact bind_is_subprob_measure _ _ ih2
+          (fun _ => ret_is_subprob_measure _)
+          (by simpa [Dist.ret_is_dirac] using
+            MeasureTheory.Measure.measurable_dirac.comp (lt_right_wrap_measurable _))
+      · exact bind_is_subprob_measure _ _ ih1
+          (fun _ => ret_is_subprob_measure _)
+          (by simpa [Dist.ret_is_dirac] using
+            MeasureTheory.Measure.measurable_dirac.comp (lt_left_wrap_measurable e2))
+  | ifE e1 e2 e3 ih1 _ _ =>
+      simp only [Untyped.step]
+      split
+      · exact ret_is_subprob_measure _
+      · exact ret_is_subprob_measure _
+      · exact bind_is_subprob_measure _ _ ih1
+          (fun _ => ret_is_subprob_measure _)
+          (by simpa [Dist.ret_is_dirac] using
+            MeasureTheory.Measure.measurable_dirac.comp (if_wrap_measurable e2 e3))
+  | uniform e1 e2 ih1 ih2 =>
+      simp only [Untyped.step]
+      split
+      · split
+        · apply bind_is_subprob_measure
+          · unfold IsSubProbabilityMeasure
+            simpa using prob_le_one (μ := ProbabilityTheory.cond volume (Set.Icc _ _)) (s := Set.univ)
+          · intro _; exact ret_is_subprob_measure _
+          · simpa [Dist.ret_is_dirac] using
+              MeasureTheory.Measure.measurable_dirac.comp const_wrap_measurable
+        · exact ret_is_subprob_measure _
+      · exact bind_is_subprob_measure _ _ ih2
+          (fun _ => ret_is_subprob_measure _)
+          (by simpa [Dist.ret_is_dirac] using
+            MeasureTheory.Measure.measurable_dirac.comp (uniform_right_wrap_measurable _))
+      · exact bind_is_subprob_measure _ _ ih1
+          (fun _ => ret_is_subprob_measure _)
+          (by simpa [Dist.ret_is_dirac] using
+            MeasureTheory.Measure.measurable_dirac.comp (uniform_left_wrap_measurable e2))
 
-/-- Specialization of bind closure when the RHS is `ret (f a b)`. -/
-lemma bind_ret_preserves_subMarkovKernel
-    {α β γ : Type}
-    [MeasurableSpace α] [MeasurableSpace β] [MeasurableSpace γ]
-    {μ : α → Measure β}
-    [∀ a, SFinite (μ a)]
-    (hμ : IsSubMarkovKernel μ)
-    {f : α → β → γ}
-    (hf : Measurable (Function.uncurry f)) :
-    IsSubMarkovKernel
-      (fun a : α => (Dist.bind (μ a) (fun b => Dist.ret (f a b)) : Dist γ)) := by
-  refine bind_preserves_subMarkovKernel
-    (μ := μ)
-    (κ := fun a b => Dist.ret (f a b))
-    hμ
-    (by
-      refine ⟨
-        (by
-          simpa [Function.uncurry, Dist.ret_is_dirac] using
-            (MeasureTheory.Measure.measurable_dirac.comp hf)),
-        (by
-          intro p
-          rcases p with ⟨a, b⟩
-          simp [IsSubProbabilityMeasure, Dist.ret_is_dirac])
-      ⟩)
-
-
--- If K : Expr → Measure Expr is already a sub-Markov kernel for stepping a subexpression, then plugging that stepped subexpression back into a larger expression form still gives a sub-Markov kernel.
-lemma let_clause_kernel
-    {K : Expr → Measure Expr}
-    (hK : IsSubMarkovKernel K)
-    (x : String) (e2 : Expr) :
-    IsSubMarkovKernel
-      (fun e1 : Expr =>
-        if isValue e1 then
-          (Dist.ret (subst x e1 e2) : Dist Expr)
-        else
-          Dist.bind (K e1) (fun g => Dist.ret (Expr.letE x g e2))) := by
-  sorry
-
-lemma if_clause_kernel
-    {K : Expr → Measure Expr}
-    (hK : IsSubMarkovKernel K)
-    (t f : Expr) :
-    IsSubMarkovKernel
-      (fun c : Expr =>
-        match c with
-        | .trueE  => Dist.ret t
-        | .falseE => Dist.ret f
-        | _       => Dist.bind (K c) (fun g => Dist.ret (Expr.ifE g t f))) := by
+lemma step_is_subprob_measure {τ : Ty} (e : ExprsOfType τ) :
+    IsSubProbabilityMeasure (step e) := by
   classical
-  rcases hK with ⟨hK_meas, hK_sub⟩
-  letI : ∀ a : Expr, IsFiniteMeasure (K a) := fun a =>
-    ⟨lt_of_le_of_lt (hK_sub a) (by simp)⟩
-  letI : ∀ a : Expr, SFinite (K a) := fun a => inferInstance
-  have hif_uncurry :
-      Measurable (Function.uncurry (fun (_ : Expr) (g : Expr) => Expr.ifE g t f)) := by
-    simpa [Function.uncurry] using (if_wrap_measurable t f).comp measurable_snd
-  have hbind :
-      IsSubMarkovKernel
-        (fun c : Expr =>
-          (Dist.bind (K c) (fun g => Dist.ret (Expr.ifE g t f)) : Dist Expr)) :=
-    bind_ret_preserves_subMarkovKernel
-      (μ := K) ⟨hK_meas, hK_sub⟩ (f := fun (_ : Expr) (g : Expr) => Expr.ifE g t f) hif_uncurry
-  rcases hbind with ⟨hbind_meas, hbind_sub⟩
-  have hEq :
-      (fun c : Expr =>
-        match c with
-        | .trueE  => Dist.ret t
-        | .falseE => Dist.ret f
-        | _       => Dist.bind (K c) (fun g => Dist.ret (Expr.ifE g t f)))
-      =
-      (fun c : Expr =>
-        if c = Expr.trueE then (Dist.ret t : Dist Expr)
-        else if c = Expr.falseE then (Dist.ret f : Dist Expr)
-        else (Dist.bind (K c) (fun g => Dist.ret (Expr.ifE g t f)) : Dist Expr)) := by
-    funext c
-    cases c <;> simp
-  refine ⟨?_, ?_⟩
-  · rw [hEq]
-    have htrueSet : MeasurableSet {c : Expr | c = Expr.trueE} := by
-      simpa [Set.setOf_eq_eq_singleton] using
-        (measurableSet_singleton (a := Expr.trueE))
-    have hfalseSet : MeasurableSet {c : Expr | c = Expr.falseE} := by
-      simpa [Set.setOf_eq_eq_singleton] using
-        (measurableSet_singleton (a := Expr.falseE))
-    refine Measurable.ite htrueSet measurable_const ?_
-    exact Measurable.ite hfalseSet measurable_const hbind_meas
-  · intro c
-    rw [hEq]
-    by_cases htrue : c = Expr.trueE
-    · simp [htrue, IsSubProbabilityMeasure, Dist.ret_is_dirac]
-    · by_cases hfalse : c = Expr.falseE
-      · simp [hfalse, IsSubProbabilityMeasure, Dist.ret_is_dirac]
-      · simpa [htrue, hfalse] using hbind_sub c
+  have hUntyped := step_untyped_is_subprob_measure e.1
+  unfold step IsSubProbabilityMeasure at hUntyped ⊢
+  let f : Expr → ExprsOfType τ :=
+    fun e' => if h : HasType Ctx.empty e' τ then (⟨e', h⟩ : ExprsOfType τ) else e
+  by_cases hf : AEMeasurable
+      f
+      (Untyped.step e.1)
+  · calc
+      (Measure.map f (Untyped.step e.1)) Set.univ
+          = (Untyped.step e.1) Set.univ := by
+            rw [Measure.map_apply_of_aemeasurable hf MeasurableSet.univ, Set.preimage_univ]
+      _ ≤ 1 := hUntyped
+  · rw [Measure.map_of_not_aemeasurable hf]
+    change (0 : ENNReal) ≤ 1
+    exact zero_le (1 : ENNReal)
 
-lemma lt_left_clause_kernel
-    {K : Expr → Measure Expr}
-    (hK : IsSubMarkovKernel K)
-    (e2 : Expr) :
-    IsSubMarkovKernel
-      (fun e1 : Expr =>
-        Dist.bind (K e1) (fun g => Dist.ret (Expr.lt g e2))) := by
-  rcases hK with ⟨hK_meas, hK_sub⟩
-  letI : ∀ a : Expr, IsFiniteMeasure (K a) := fun a =>
-    ⟨lt_of_le_of_lt (hK_sub a) (by simp)⟩
-  letI : ∀ a : Expr, SFinite (K a) := fun a => inferInstance
-  exact bind_ret_preserves_subMarkovKernel
-    (μ := K)
-    ⟨hK_meas, hK_sub⟩
-    (f := fun (_ : Expr) (g : Expr) => Expr.lt g e2)
-    (by
-      simpa [Function.uncurry] using (lt_left_wrap_measurable e2).comp measurable_snd)
+-- ---------------------------------------------------------------------------
+-- 2. Measurability
+-- ---------------------------------------------------------------------------
 
-lemma lt_right_clause_kernel
-    {K : Expr → Measure Expr}
-    (hK : IsSubMarkovKernel K)
-    (v1 : ℝ) :
-    IsSubMarkovKernel
-      (fun e2 : Expr =>
-        Dist.bind (K e2) (fun g => Dist.ret (Expr.lt (.const v1) g))) := by
-  rcases hK with ⟨hK_meas, hK_sub⟩
-  letI : ∀ a : Expr, IsFiniteMeasure (K a) := fun a =>
-    ⟨lt_of_le_of_lt (hK_sub a) (by simp)⟩
-  letI : ∀ a : Expr, SFinite (K a) := fun a => inferInstance
-  exact bind_ret_preserves_subMarkovKernel
-    (μ := K)
-    ⟨hK_meas, hK_sub⟩
-    (f := fun (_ : Expr) (g : Expr) => Expr.lt (.const v1) g)
-    (by
-      simpa [Function.uncurry] using (lt_right_wrap_measurable v1).comp measurable_snd)
+-- At a high-level:
+-- From `Measurable (fun e => Untyped.step e)`, transform the goal to `∀ σ, Measurable (fun v => Untyped.step (Untyped.fillSkeleton σ v))` by applying fillSkeleton_measurable_expr.
+-- Fix σ. Prove by induction on σ.
 
-lemma uniform_left_clause_kernel
-    {K : Expr → Measure Expr}
-    (hK : IsSubMarkovKernel K)
-    (e2 : Expr) :
-    IsSubMarkovKernel
-      (fun e1 : Expr =>
-        Dist.bind (K e1) (fun g => Dist.ret (Expr.uniform g e2))) := by
-  rcases hK with ⟨hK_meas, hK_sub⟩
-  letI : ∀ a : Expr, IsFiniteMeasure (K a) := fun a =>
-    ⟨lt_of_le_of_lt (hK_sub a) (by simp)⟩
-  letI : ∀ a : Expr, SFinite (K a) := fun a => inferInstance
-  exact bind_ret_preserves_subMarkovKernel
-    (μ := K)
-    ⟨hK_meas, hK_sub⟩
-    (f := fun (_ : Expr) (g : Expr) => Expr.uniform g e2)
-    (by
-      simpa [Function.uncurry] using (uniform_left_wrap_measurable e2).comp measurable_snd)
-
-lemma uniform_right_clause_kernel
-    {K : Expr → Measure Expr}
-    (hK : IsSubMarkovKernel K)
-    (v1 : ℝ) :
-    IsSubMarkovKernel
-      (fun e2 : Expr =>
-        Dist.bind (K e2) (fun g => Dist.ret (Expr.uniform (.const v1) g))) := by
-  rcases hK with ⟨hK_meas, hK_sub⟩
-  letI : ∀ a : Expr, IsFiniteMeasure (K a) := fun a =>
-    ⟨lt_of_le_of_lt (hK_sub a) (by simp)⟩
-  letI : ∀ a : Expr, SFinite (K a) := fun a => inferInstance
-  exact bind_ret_preserves_subMarkovKernel
-    (μ := K)
-    ⟨hK_meas, hK_sub⟩
-    (f := fun (_ : Expr) (g : Expr) => Expr.uniform (.const v1) g)
-    (by
-      simpa [Function.uncurry] using (uniform_right_wrap_measurable v1).comp measurable_snd)
-
-
+/-- If a skeleton is not `hole`, filling it can never produce `Expr.const r`. -/
 lemma fillSkeleton_not_const_of_ne_hole
     {s : Untyped.Skeleton}
     (hs : s ≠ Untyped.Skeleton.hole) :
@@ -511,6 +379,7 @@ lemma fillSkeleton_not_const_of_ne_hole
   intro v
   cases s <;> simp [Untyped.fillSkeleton] at hs ⊢
 
+/-- If a skeleton is not `trueE`, filling it can never be exactly `Expr.trueE`. -/
 lemma fillSkeleton_not_true_of_ne_trueE
     {s : Untyped.Skeleton}
     (hs : s ≠ Untyped.Skeleton.trueE) :
@@ -518,6 +387,7 @@ lemma fillSkeleton_not_true_of_ne_trueE
   intro v
   cases s <;> simp [Untyped.fillSkeleton] at hs ⊢
 
+/-- If a skeleton is not `falseE`, filling it can never be exactly `Expr.falseE`. -/
 lemma fillSkeleton_not_false_of_ne_falseE
     {s : Untyped.Skeleton}
     (hs : s ≠ Untyped.Skeleton.falseE) :
@@ -525,222 +395,53 @@ lemma fillSkeleton_not_false_of_ne_falseE
   intro v
   cases s <;> simp [Untyped.fillSkeleton] at hs ⊢
 
-/-- Measurability of dependent `bind` into `ret`. -/
-axiom bind_ret_dep_measurable
-    {α β γ : Type}
-    [MeasurableSpace α] [MeasurableSpace β] [MeasurableSpace γ]
-    {μ : α → Measure β}
+
+/-- If μ is measurable and each (μ a) is a subprobability, and F is measurable, then a ↦ bind (μ a) (fun g => ret (F a g)) is measurable. -/
+lemma bind_is_measurable
+    {α : Type} [MeasurableSpace α]
+    {μ : α → Measure Expr}
     (hμ : Measurable μ)
-    {f : α → β → γ}
-    (hf : Measurable (Function.uncurry f)) :
-    Measurable (fun a : α => (Dist.bind (μ a) (fun b => Dist.ret (f a b)) : Dist γ))
+    (hμ_sub : ∀ a : α, IsSubProbabilityMeasure (μ a))
+    {F : α → Expr → Expr}
+    (hF : Measurable (Function.uncurry F)) :
+    Measurable
+      (fun a : α => Dist.bind (μ a) (fun g => Dist.ret (F a g))) := by
+  let μK : Kernel α Expr := ⟨μ, hμ⟩
+  have hμK_fin : IsFiniteKernel μK := by
+    refine ⟨⟨1, by simp, by intro a; exact hμ_sub a⟩⟩
+  letI : IsFiniteKernel μK := hμK_fin
+  have hκ_meas :
+      Measurable
+        (Function.uncurry
+          (fun a : α => fun g : Expr => (Measure.dirac (F a g) : Measure Expr))) := by
+    simpa [Function.uncurry] using (MeasureTheory.Measure.measurable_dirac.comp hF)
+  let κK : Kernel (α × Expr) Expr :=
+    ⟨fun p => Measure.dirac (F p.1 p.2),
+     by simpa [Function.uncurry] using hκ_meas⟩
+  have hEq :
+      (fun a : α => Dist.bind (μ a) (fun g => Dist.ret (F a g))) =
+      (fun a : α => ((κK ∘ₖ Kernel.prod Kernel.id μK) a : Measure Expr)) := by
+    funext a
+    ext s hs
+    rw [Dist.bind_is_measure_bind,
+        Measure.bind_apply hs
+          (by
+            simpa [Dist.ret_is_dirac] using
+              (MeasureTheory.Measure.measurable_dirac.comp
+                (Measurable.of_uncurry_left (f := F) hF (x := a))).aemeasurable),
+        Kernel.comp_apply' _ _ _ hs,
+        Kernel.lintegral_id_prod
+          (hf := Kernel.measurable_coe κK hs)
+          (κ := μK) (a := a) (f := fun p : α × Expr => κK p s)]
+    simp [κK, μK, Dist.ret_is_dirac]
+  rw [hEq]
+  exact Kernel.measurable _
 
-/-- Uncurry measurability for `(a,g) ↦ lt g (e₂ a)`. -/
-axiom lt_left_dep_uncurry_measurable
-    {α : Type}
-    [MeasurableSpace α]
-    {e2 : α → Expr} :
-    Measurable (Function.uncurry (fun a : α => fun g : Expr => Expr.lt g (e2 a)))
-
-/-- Uncurry measurability for `(a,g) ↦ lt (const (r a)) g`. -/
-axiom lt_right_dep_uncurry_measurable
-    {α : Type}
-    [MeasurableSpace α]
-    {r : α → ℝ} :
-    Measurable (Function.uncurry (fun a : α => fun g : Expr => Expr.lt (.const (r a)) g))
-
-/-- Uncurry measurability for `(a,g) ↦ ifE g (t a) (f a)`. -/
-axiom if_dep_uncurry_measurable
-    {α : Type}
-    [MeasurableSpace α]
-    {t f : α → Expr} :
-    Measurable (Function.uncurry (fun a : α => fun g : Expr => Expr.ifE g (t a) (f a)))
-
-/-- Measurability of `a ↦ ret (fillSkeleton σ (p a))`. -/
-axiom fill_ret_slice_measurable
-    {α : Type}
-    [MeasurableSpace α]
-    (σ : Untyped.Skeleton)
-    (p : α → Fin (Untyped.numHoles σ) → ℝ)
-    (hp : Measurable p) :
-    Measurable (fun a : α => (Dist.ret (Untyped.fillSkeleton σ (p a)) : Dist Expr))
-
-/-- Uncurry measurability for `(a,g) ↦ uniform g (e₂ a)`. -/
-axiom uniform_left_dep_uncurry_measurable
-    {α : Type}
-    [MeasurableSpace α]
-    {e2 : α → Expr} :
-    Measurable (Function.uncurry (fun a : α => fun g : Expr => Expr.uniform g (e2 a)))
-
-/-- Uncurry measurability for `(a,g) ↦ uniform (const (r a)) g`. -/
-axiom uniform_right_dep_uncurry_measurable
-    {α : Type}
-    [MeasurableSpace α]
-    {r : α → ℝ} :
-    Measurable (Function.uncurry (fun a : α => fun g : Expr => Expr.uniform (.const (r a)) g))
-
-/-- Measurability of the const/const uniform branch. -/
-axiom uniform_const_const_branch_measurable
-    {α : Type}
-    [MeasurableSpace α]
-    {lo hi : α → ℝ} :
-    Measurable (fun a : α =>
-      if lo a ≤ hi a then
-        (Dist.bind (ProbabilityTheory.cond MeasureTheory.volume (Set.Icc (lo a) (hi a)))
-          (fun r => Dist.ret (Expr.const r)) : Dist Expr)
-      else
-        (Dist.ret Expr.diverge : Dist Expr))
-
-/-- Uncurry measurability for `(a,g) ↦ letE x g (e₂ a)`. -/
-axiom let_dep_uncurry_measurable
-    {α : Type}
-    [MeasurableSpace α]
-    (x : String)
-    {e2 : α → Expr} :
-    Measurable (Function.uncurry (fun a : α => fun g : Expr => Expr.letE x g (e2 a)))
-
-/-- Measurability of `a ↦ ret (subst x (v a) (e₂ a))`. -/
-axiom subst_dep_ret_measurable
-    {α : Type}
-    [MeasurableSpace α]
-    (x : String)
-    {v e2 : α → Expr} :
-    Measurable (fun a : α => (Dist.ret (subst x (v a) (e2 a)) : Dist Expr))
-
-
-lemma step_lt_slice_measurable
-    (s1 s2 : Untyped.Skeleton)
-    (ih1 : Measurable (fun v : Fin (Untyped.numHoles s1) → ℝ => Untyped.step (Untyped.fillSkeleton s1 v)))
-    (ih2 : Measurable (fun v : Fin (Untyped.numHoles s2) → ℝ => Untyped.step (Untyped.fillSkeleton s2 v))) :
-    Measurable (fun v : Fin (Untyped.numHoles s1 + Untyped.numHoles s2) → ℝ =>
-      match Untyped.fillSkeleton s1 (fun i => v (Fin.castAdd (Untyped.numHoles s2) i)),
-            Untyped.fillSkeleton s2 (fun i => v (Fin.natAdd (Untyped.numHoles s1) i)) with
-      | Expr.const v1, Expr.const v2 =>
-          if v1 < v2 then (Dist.ret Expr.trueE : Dist Expr)
-          else (Dist.ret Expr.falseE : Dist Expr)
-      | Expr.const v1, _ =>
-          Dist.bind
-            (Untyped.step (Untyped.fillSkeleton s2 (fun i => v (Fin.natAdd (Untyped.numHoles s1) i))))
-            (fun g => Dist.ret (Expr.lt (.const v1) g))
-      | _, _ =>
-          Dist.bind
-            (Untyped.step (Untyped.fillSkeleton s1 (fun i => v (Fin.castAdd (Untyped.numHoles s2) i))))
-            (fun g => Dist.ret (Expr.lt g (Untyped.fillSkeleton s2 (fun i => v (Fin.natAdd (Untyped.numHoles s1) i)))))) := by
-  classical
-  let α := Fin (Untyped.numHoles s1 + Untyped.numHoles s2) → ℝ
-  let v1 : α → (Fin (Untyped.numHoles s1) → ℝ) :=
-    fun v i => v (Fin.castAdd (Untyped.numHoles s2) i)
-  let v2 : α → (Fin (Untyped.numHoles s2) → ℝ) :=
-    fun v i => v (Fin.natAdd (Untyped.numHoles s1) i)
-  have hv1 : Measurable v1 := by
-    refine measurable_pi_iff.2 ?_
-    intro i
-    simpa [v1] using (measurable_pi_apply (Fin.castAdd (Untyped.numHoles s2) i))
-  have hv2 : Measurable v2 := by
-    refine measurable_pi_iff.2 ?_
-    intro i
-    simpa [v2] using (measurable_pi_apply (Fin.natAdd (Untyped.numHoles s1) i))
-  by_cases hs1 : s1 = Untyped.Skeleton.hole
-  · subst hs1
-    let i0 : Fin (Untyped.numHoles Untyped.Skeleton.hole) := ⟨0, by simp [Untyped.numHoles]⟩
-    by_cases hs2 : s2 = Untyped.Skeleton.hole
-    · subst hs2
-      refine Measurable.ite ?_ measurable_const measurable_const
-      simpa [Untyped.numHoles] using
-        (measurableSet_lt
-          (measurable_pi_apply (Fin.castAdd 1 (0 : Fin 1)))
-          (measurable_pi_apply (Fin.natAdd 1 (0 : Fin 1))))
-    · have hEq :
-        (fun v : α =>
-          match Untyped.fillSkeleton Untyped.Skeleton.hole (v1 v),
-                Untyped.fillSkeleton s2 (v2 v) with
-          | Expr.const v1, Expr.const v2 =>
-              if v1 < v2 then (Dist.ret Expr.trueE : Dist Expr)
-              else (Dist.ret Expr.falseE : Dist Expr)
-          | Expr.const v1, _ =>
-              Dist.bind
-                (Untyped.step (Untyped.fillSkeleton s2 (v2 v)))
-                (fun g => Dist.ret (Expr.lt (.const v1) g))
-          | _, _ =>
-              Dist.bind
-                (Untyped.step (Untyped.fillSkeleton Untyped.Skeleton.hole (v1 v)))
-                (fun g => Dist.ret (Expr.lt g (Untyped.fillSkeleton s2 (v2 v)))))
-        =
-        (fun v : α =>
-          Dist.bind
-            (Untyped.step (Untyped.fillSkeleton s2 (v2 v)))
-            (fun g =>
-              Dist.ret
-                (Expr.lt
-                  (.const ((v1 v) i0))
-                  g))) := by
-        funext v
-        have hnot2 : ¬ ∃ r : ℝ, Untyped.fillSkeleton s2 (v2 v) = Expr.const r :=
-          fillSkeleton_not_const_of_ne_hole hs2 (v2 v)
-        cases h2 : Untyped.fillSkeleton s2 (v2 v) with
-        | const r =>
-            exact (False.elim (hnot2 ⟨r, h2⟩))
-        | var _ | trueE | falseE | finconst _ _ | discrete _ | diverge
-          | letE _ _ _ | lt _ _ | ifE _ _ _ | uniform _ _ =>
-            simpa [Untyped.fillSkeleton, i0]
-      rw [hEq]
-      let μ : α → Measure Expr := fun v => Untyped.step (Untyped.fillSkeleton s2 (v2 v))
-      have hμ : Measurable μ := by
-        simpa [μ] using ih2.comp hv2
-      have hbind :
-          Measurable
-            (fun v : α =>
-              Dist.bind (μ v) (fun g => Dist.ret (Expr.lt (.const ((v1 v) i0)) g))) :=
-        bind_ret_dep_measurable
-          (μ := μ) hμ
-          (f := fun v g => Expr.lt (.const ((v1 v) i0)) g)
-          (hf := lt_right_dep_uncurry_measurable (r := fun v : α => (v1 v) i0))
-      simpa [μ] using hbind
-  · have hEq :
-      (fun v : α =>
-        match Untyped.fillSkeleton s1 (v1 v),
-              Untyped.fillSkeleton s2 (v2 v) with
-        | Expr.const v1, Expr.const v2 =>
-            if v1 < v2 then (Dist.ret Expr.trueE : Dist Expr)
-            else (Dist.ret Expr.falseE : Dist Expr)
-        | Expr.const v1, _ =>
-            Dist.bind
-              (Untyped.step (Untyped.fillSkeleton s2 (v2 v)))
-              (fun g => Dist.ret (Expr.lt (.const v1) g))
-        | _, _ =>
-            Dist.bind
-              (Untyped.step (Untyped.fillSkeleton s1 (v1 v)))
-              (fun g => Dist.ret (Expr.lt g (Untyped.fillSkeleton s2 (v2 v)))))
-      =
-      (fun v : α =>
-        Dist.bind
-          (Untyped.step (Untyped.fillSkeleton s1 (v1 v)))
-          (fun g => Dist.ret (Expr.lt g (Untyped.fillSkeleton s2 (v2 v))))) := by
-      funext v
-      have hnot1 : ¬ ∃ r : ℝ, Untyped.fillSkeleton s1 (v1 v) = Expr.const r :=
-        fillSkeleton_not_const_of_ne_hole hs1 (v1 v)
-      cases h1 : Untyped.fillSkeleton s1 (v1 v) <;> simp [h1] at hnot1 ⊢
-    rw [hEq]
-    let μ : α → Measure Expr := fun v => Untyped.step (Untyped.fillSkeleton s1 (v1 v))
-    have hμ : Measurable μ := by
-      simpa [μ] using ih1.comp hv1
-    have hbind :
-        Measurable
-          (fun v : α =>
-            Dist.bind
-              (μ v)
-              (fun g => Dist.ret (Expr.lt g (Untyped.fillSkeleton s2 (v2 v))))) :=
-      bind_ret_dep_measurable
-        (μ := μ) hμ
-        (f := fun v g => Expr.lt g (Untyped.fillSkeleton s2 (v2 v)))
-        (hf := lt_left_dep_uncurry_measurable (e2 := fun v : α => Untyped.fillSkeleton s2 (v2 v)))
-    simpa [μ] using hbind
-
+/-- Filling an if skeleton with a hole assignment v is measurable. -/
 lemma step_if_slice_measurable
     (s1 s2 s3 : Untyped.Skeleton)
-    (ih1 : Measurable (fun v : Fin (Untyped.numHoles s1) → ℝ => Untyped.step (Untyped.fillSkeleton s1 v)))
-    (ih2 : Measurable (fun v : Fin (Untyped.numHoles s2) → ℝ => Untyped.step (Untyped.fillSkeleton s2 v)))
-    (ih3 : Measurable (fun v : Fin (Untyped.numHoles s3) → ℝ => Untyped.step (Untyped.fillSkeleton s3 v))) :
+    (ih1 : Measurable (fun v : Fin (Untyped.numHoles s1) → ℝ =>
+      Untyped.step (Untyped.fillSkeleton s1 v))) :
     Measurable (fun v : Fin (Untyped.numHoles s1 + (Untyped.numHoles s2 + Untyped.numHoles s3)) → ℝ =>
       match Untyped.fillSkeleton s1 (fun i => v (Fin.castAdd (Untyped.numHoles s2 + Untyped.numHoles s3) i)) with
       | Expr.trueE =>
@@ -757,91 +458,209 @@ lemma step_if_slice_measurable
                   (Untyped.fillSkeleton s3 (fun i => v (Fin.natAdd (Untyped.numHoles s1) (Fin.natAdd (Untyped.numHoles s2) i))))))) := by
   classical
   let α := Fin (Untyped.numHoles s1 + (Untyped.numHoles s2 + Untyped.numHoles s3)) → ℝ
+
+  -- Split a single combined hole assignment into projections v1, v2, v3 (for condition/then/else holes)
   let v1 : α → (Fin (Untyped.numHoles s1) → ℝ) :=
     fun v i => v (Fin.castAdd (Untyped.numHoles s2 + Untyped.numHoles s3) i)
   let v2 : α → (Fin (Untyped.numHoles s2) → ℝ) :=
     fun v i => v (Fin.natAdd (Untyped.numHoles s1) (Fin.castAdd (Untyped.numHoles s3) i))
   let v3 : α → (Fin (Untyped.numHoles s3) → ℝ) :=
     fun v i => v (Fin.natAdd (Untyped.numHoles s1) (Fin.natAdd (Untyped.numHoles s2) i))
+
+  -- Prove each projection v1, v2, v3 is measurable
   have hv1 : Measurable v1 := by
-    refine measurable_pi_iff.2 ?_
-    intro i
-    simpa [v1] using
-      (measurable_pi_apply (Fin.castAdd (Untyped.numHoles s2 + Untyped.numHoles s3) i))
+    exact measurable_pi_iff.2 (fun i => by
+      simpa [v1] using
+        (measurable_pi_apply (Fin.castAdd (Untyped.numHoles s2 + Untyped.numHoles s3) i)))
   have hv2 : Measurable v2 := by
-    refine measurable_pi_iff.2 ?_
-    intro i
-    simpa [v2] using
-      (measurable_pi_apply (Fin.natAdd (Untyped.numHoles s1) (Fin.castAdd (Untyped.numHoles s3) i)))
+    exact measurable_pi_iff.2 (fun i => by
+      simpa [v2] using
+        (measurable_pi_apply (Fin.natAdd (Untyped.numHoles s1) (Fin.castAdd (Untyped.numHoles s3) i))))
   have hv3 : Measurable v3 := by
-    refine measurable_pi_iff.2 ?_
-    intro i
-    simpa [v3] using
-      (measurable_pi_apply (Fin.natAdd (Untyped.numHoles s1) (Fin.natAdd (Untyped.numHoles s2) i)))
+    exact measurable_pi_iff.2 (fun i => by
+      simpa [v3] using
+        (measurable_pi_apply (Fin.natAdd (Untyped.numHoles s1) (Fin.natAdd (Untyped.numHoles s2) i))))
+
+  -- Define c, t, f as the filled condition/then/else expressions.
+  let c : α → Expr := fun v => Untyped.fillSkeleton s1 (v1 v)
+  let t : α → Expr := fun v => Untyped.fillSkeleton s2 (v2 v)
+  let f : α → Expr := fun v => Untyped.fillSkeleton s3 (v3 v)
+
+  -- Case split on s1.
   by_cases hs1t : s1 = Untyped.Skeleton.trueE
+  -- if s1 = trueE, expression is always ret (t v). This is measurable by measurable_dirac.
   · subst hs1t
-    have hret :
-        Measurable (fun v : α => (Dist.ret (Untyped.fillSkeleton s2 (v2 v)) : Dist Expr)) :=
-      fill_ret_slice_measurable s2 v2 hv2
-    simpa [Untyped.fillSkeleton] using hret
+    simpa [Dist.ret_is_dirac] using
+      (MeasureTheory.Measure.measurable_dirac.comp ((fillSkeleton_measurable_skel s2).comp hv2))
   · by_cases hs1f : s1 = Untyped.Skeleton.falseE
+    -- if s1 = false, expression is always ret (f v). This is measurable by measurable_dirac.
     · subst hs1f
-      have hret :
-          Measurable (fun v : α => (Dist.ret (Untyped.fillSkeleton s3 (v3 v)) : Dist Expr)) :=
-        fill_ret_slice_measurable s3 v3 hv3
-      simpa [Untyped.fillSkeleton] using hret
+      simpa [Dist.ret_is_dirac] using
+        (MeasureTheory.Measure.measurable_dirac.comp ((fillSkeleton_measurable_skel s3).comp hv3))
+    -- Otherwise `c v` can never be `trueE`/`falseE`; only the bind works.
     · have hEq :
+          (fun v : α =>
+            match c v with
+            | Expr.trueE  => Dist.ret (t v)
+            | Expr.falseE => Dist.ret (f v)
+            | _           => Dist.bind (Untyped.step (c v)) (fun g => Dist.ret (Expr.ifE g (t v) (f v))))
+          =
+          (fun v : α =>
+            Dist.bind (Untyped.step (c v)) (fun g => Dist.ret (Expr.ifE g (t v) (f v)))) := by
+          funext v
+          have hnt : c v ≠ Expr.trueE :=
+            fillSkeleton_not_true_of_ne_trueE hs1t (v1 v)
+          have hnf : c v ≠ Expr.falseE :=
+            fillSkeleton_not_false_of_ne_falseE hs1f (v1 v)
+          cases hc : c v <;> simp [hc] at hnt hnf ⊢
+
+      rw [hEq]
+      -- Bind is measurable. Obtain measurability of (v,g) ↦ ifE g (t v) (f v) from if_dep_uncurry_measurable.
+      exact
+        bind_is_measurable
+          (by simpa [c] using ih1.comp hv1)
+          (fun v : α => step_untyped_is_subprob_measure (c v))
+          (if_dep_uncurry_measurable
+            (t := t) (f := f)
+            (by simpa [t] using ((fillSkeleton_measurable_skel s2).comp hv2))
+            (by simpa [f] using ((fillSkeleton_measurable_skel s3).comp hv3)))
+
+
+/-- Filling a lt skeleton with a hole assignment v is measurable. -/
+lemma step_lt_slice_measurable
+    (s1 s2 : Untyped.Skeleton)
+    (ih1 : Measurable (fun v : Fin (Untyped.numHoles s1) → ℝ =>
+      Untyped.step (Untyped.fillSkeleton s1 v)))
+    (ih2 : Measurable (fun v : Fin (Untyped.numHoles s2) → ℝ =>
+      Untyped.step (Untyped.fillSkeleton s2 v))) :
+    Measurable (fun v : Fin (Untyped.numHoles s1 + Untyped.numHoles s2) → ℝ =>
+      match Untyped.fillSkeleton s1 (fun i => v (Fin.castAdd (Untyped.numHoles s2) i)),
+            Untyped.fillSkeleton s2 (fun i => v (Fin.natAdd (Untyped.numHoles s1) i)) with
+      | Expr.const v1, Expr.const v2 =>
+          if v1 < v2 then (Dist.ret Expr.trueE : Dist Expr)
+          else (Dist.ret Expr.falseE : Dist Expr)
+      | Expr.const v1, _ =>
+          Dist.bind
+            (Untyped.step (Untyped.fillSkeleton s2 (fun i => v (Fin.natAdd (Untyped.numHoles s1) i))))
+            (fun g => Dist.ret (Expr.lt (.const v1) g))
+      | _, _ =>
+          Dist.bind
+            (Untyped.step (Untyped.fillSkeleton s1 (fun i => v (Fin.castAdd (Untyped.numHoles s2) i))))
+            (fun g => Dist.ret (Expr.lt g (Untyped.fillSkeleton s2 (fun i => v (Fin.natAdd (Untyped.numHoles s1) i)))))) := by
+  classical
+  let α := Fin (Untyped.numHoles s1 + Untyped.numHoles s2) → ℝ
+  -- Split a single combined hole assignment into projections v1, v2 (for lhs/rhs holes)
+  let v1 : α → (Fin (Untyped.numHoles s1) → ℝ) :=
+    fun v i => v (Fin.castAdd (Untyped.numHoles s2) i)
+  let v2 : α → (Fin (Untyped.numHoles s2) → ℝ) :=
+    fun v i => v (Fin.natAdd (Untyped.numHoles s1) i)
+  -- Prove each projection v1, v2 is measurable
+  have hv1 : Measurable v1 := by
+    exact measurable_pi_iff.2 (fun i => by
+      simpa [v1] using (measurable_pi_apply (Fin.castAdd (Untyped.numHoles s2) i)))
+  have hv2 : Measurable v2 := by
+    exact measurable_pi_iff.2 (fun i => by
+      simpa [v2] using (measurable_pi_apply (Fin.natAdd (Untyped.numHoles s1) i)))
+
+  -- Define l, r as the filled lhs/rhs expressions of the lt expression. Get measurability of l and r from IH.
+  let l : α → Expr := fun v => Untyped.fillSkeleton s1 (v1 v)
+  let r : α → Expr := fun v => Untyped.fillSkeleton s2 (v2 v)
+  have hμl : Measurable (fun v : α => Untyped.step (l v)) := by
+    simpa [l] using ih1.comp hv1
+  have hμr : Measurable (fun v : α => Untyped.step (r v)) := by
+    simpa [r] using ih2.comp hv2
+
+  -- Case split on s1.
+  by_cases hs1 : s1 = Untyped.Skeleton.hole
+  · subst hs1
+    let i0 : Fin (Untyped.numHoles Untyped.Skeleton.hole) := ⟨0, by simp [Untyped.numHoles]⟩
+    -- If both sides are holes, we are in the pure const/const branch and measurability is an `ite`.
+    by_cases hs2 : s2 = Untyped.Skeleton.hole
+    · subst hs2
+      have hlt :
+          MeasurableSet
+            {v : α | v (Fin.castAdd 1 (0 : Fin 1)) < v (Fin.natAdd 1 (0 : Fin 1))} := by
+        simpa [Untyped.numHoles] using
+          (measurableSet_lt
+            (measurable_pi_apply (Fin.castAdd 1 (0 : Fin 1)))
+            (measurable_pi_apply (Fin.natAdd 1 (0 : Fin 1))))
+      exact Measurable.ite hlt measurable_const measurable_const
+    -- Left is const, right is never const: collapse to the right-bind branch.
+    · have hEq :
+          (fun v : α =>
+            match l v, r v with
+            | Expr.const v1, Expr.const v2 =>
+                if v1 < v2 then (Dist.ret Expr.trueE : Dist Expr)
+                else (Dist.ret Expr.falseE : Dist Expr)
+            | Expr.const v1, _ =>
+                Dist.bind (Untyped.step (r v)) (fun g => Dist.ret (Expr.lt (.const v1) g))
+            | _, _ =>
+                Dist.bind (Untyped.step (l v)) (fun g => Dist.ret (Expr.lt g (r v))))
+          =
+          (fun v : α =>
+            Dist.bind (Untyped.step (r v))
+              (fun g => Dist.ret (Expr.lt (.const ((v1 v) i0)) g))) := by
+        funext v
+        have hnot2 : ¬ ∃ rr : ℝ, Untyped.fillSkeleton s2 (v2 v) = Expr.const rr :=
+          fillSkeleton_not_const_of_ne_hole hs2 (v2 v)
+        cases hr : r v with
+        | const rr =>
+            exact False.elim (hnot2 ⟨rr, by simpa [r] using hr⟩)
+        | var _ | trueE | falseE | finconst _ _ | discrete _ | diverge
+          | letE _ _ _ | lt _ _ | ifE _ _ _ | uniform _ _ =>
+            simp [l, r, Untyped.fillSkeleton, i0]
+      rw [hEq]
+      -- Final closure: measurable input kernel + measurable `(v,g) ↦ lt (const ...) g`.
+      exact
+        bind_is_measurable
+          hμr
+          (fun v : α => step_untyped_is_subprob_measure (r v))
+          (lt_right_dep_uncurry_measurable
+            (r := fun v : α => (v1 v) i0)
+            ((measurable_pi_apply i0).comp hv1))
+  -- Left is never const: collapse to the fallback left-bind branch.
+  · have hEq :
         (fun v : α =>
-          match Untyped.fillSkeleton s1 (v1 v) with
-          | Expr.trueE =>
-              Dist.ret (Untyped.fillSkeleton s2 (v2 v))
-          | Expr.falseE =>
-              Dist.ret (Untyped.fillSkeleton s3 (v3 v))
-          | _ =>
-              Dist.bind
-                (Untyped.step (Untyped.fillSkeleton s1 (v1 v)))
-                (fun g => Dist.ret (Expr.ifE g (Untyped.fillSkeleton s2 (v2 v)) (Untyped.fillSkeleton s3 (v3 v)))))
+          match l v, r v with
+          | Expr.const v1, Expr.const v2 =>
+              if v1 < v2 then (Dist.ret Expr.trueE : Dist Expr)
+              else (Dist.ret Expr.falseE : Dist Expr)
+          | Expr.const v1, _ =>
+              Dist.bind (Untyped.step (r v)) (fun g => Dist.ret (Expr.lt (.const v1) g))
+          | _, _ =>
+              Dist.bind (Untyped.step (l v)) (fun g => Dist.ret (Expr.lt g (r v))))
         =
         (fun v : α =>
-          Dist.bind
-            (Untyped.step (Untyped.fillSkeleton s1 (v1 v)))
-            (fun g => Dist.ret (Expr.ifE g (Untyped.fillSkeleton s2 (v2 v)) (Untyped.fillSkeleton s3 (v3 v))))) := by
-        funext v
-        have hnt : Untyped.fillSkeleton s1 (v1 v) ≠ Expr.trueE :=
-          fillSkeleton_not_true_of_ne_trueE hs1t (v1 v)
-        have hnf : Untyped.fillSkeleton s1 (v1 v) ≠ Expr.falseE :=
-          fillSkeleton_not_false_of_ne_falseE hs1f (v1 v)
-        cases h1 : Untyped.fillSkeleton s1 (v1 v) with
-        | trueE =>
-            exact (False.elim (hnt h1))
-        | falseE =>
-            exact (False.elim (hnf h1))
-        | var _ | const _ | finconst _ _ | discrete _ | diverge
-          | letE _ _ _ | lt _ _ | ifE _ _ _ | uniform _ _ =>
-            simp [h1]
-      rw [hEq]
-      let μ : α → Measure Expr := fun v => Untyped.step (Untyped.fillSkeleton s1 (v1 v))
-      have hμ : Measurable μ := by
-        simpa [μ] using ih1.comp hv1
-      have hbind :
-          Measurable
-            (fun v : α =>
-              Dist.bind
-                (μ v)
-                (fun g => Dist.ret (Expr.ifE g (Untyped.fillSkeleton s2 (v2 v)) (Untyped.fillSkeleton s3 (v3 v))))) :=
-        bind_ret_dep_measurable
-          (μ := μ) hμ
-          (f := fun v g => Expr.ifE g (Untyped.fillSkeleton s2 (v2 v)) (Untyped.fillSkeleton s3 (v3 v)))
-          (hf := if_dep_uncurry_measurable
-            (t := fun v : α => Untyped.fillSkeleton s2 (v2 v))
-            (f := fun v : α => Untyped.fillSkeleton s3 (v3 v)))
-      simpa [μ] using hbind
+          Dist.bind (Untyped.step (l v)) (fun g => Dist.ret (Expr.lt g (r v)))) := by
+      funext v
+      have hnot1 : ¬ ∃ rr : ℝ, Untyped.fillSkeleton s1 (v1 v) = Expr.const rr :=
+        fillSkeleton_not_const_of_ne_hole hs1 (v1 v)
+      cases hl : l v with
+      | const rr =>
+          exact False.elim (hnot1 ⟨rr, by simpa [l] using hl⟩)
+      | var _ | trueE | falseE | finconst _ _ | discrete _ | diverge
+        | letE _ _ _ | lt _ _ | ifE _ _ _ | uniform _ _ =>
+          simp [l, r]
+    rw [hEq]
+    have hr : Measurable r := by
+      simpa [r] using ((fillSkeleton_measurable_skel s2).comp hv2)
+    -- Final closure: measurable input kernel + measurable `(v,g) ↦ lt g (r v)`.
+    exact
+      bind_is_measurable
+        hμl
+        (fun v : α => step_untyped_is_subprob_measure (l v))
+        (lt_left_dep_uncurry_measurable (e2 := r) hr)
 
+
+/-- Filling a let skeleton with a hole assignment v is measurable. -/
 lemma step_let_slice_measurable
     (x : String) (s1 s2 : Untyped.Skeleton)
-    (ih1 : Measurable (fun v : Fin (Untyped.numHoles s1) → ℝ => Untyped.step (Untyped.fillSkeleton s1 v))) :
+    (ih1 : Measurable (fun v : Fin (Untyped.numHoles s1) → ℝ =>
+      Untyped.step (Untyped.fillSkeleton s1 v)))
+    (ih2 : Measurable (fun v : Fin (Untyped.numHoles s2) → ℝ =>
+      Untyped.step (Untyped.fillSkeleton s2 v))) :
     Measurable (fun v : Fin (Untyped.numHoles s1 + Untyped.numHoles s2) → ℝ =>
-      if isValue (Untyped.fillSkeleton s1 (fun i => v (Fin.castAdd (Untyped.numHoles s2) i)) ) then
+      if isValue (Untyped.fillSkeleton s1 (fun i => v (Fin.castAdd (Untyped.numHoles s2) i))) then
         Dist.ret
           (subst x
             (Untyped.fillSkeleton s1 (fun i => v (Fin.castAdd (Untyped.numHoles s2) i)))
@@ -849,93 +668,82 @@ lemma step_let_slice_measurable
       else
         Dist.bind
           (Untyped.step (Untyped.fillSkeleton s1 (fun i => v (Fin.castAdd (Untyped.numHoles s2) i))))
-          (fun g =>
-            Dist.ret
-              (Expr.letE x g
-                (Untyped.fillSkeleton s2 (fun i => v (Fin.natAdd (Untyped.numHoles s1) i)))))) := by
+          (fun g => Dist.ret (Expr.letE x g (Untyped.fillSkeleton s2 (fun i => v (Fin.natAdd (Untyped.numHoles s1) i)))))) := by
   classical
   let α := Fin (Untyped.numHoles s1 + Untyped.numHoles s2) → ℝ
+  -- Project one combined hole-assignment into lhs/rhs assignments.
   let v1 : α → (Fin (Untyped.numHoles s1) → ℝ) :=
     fun v i => v (Fin.castAdd (Untyped.numHoles s2) i)
   let v2 : α → (Fin (Untyped.numHoles s2) → ℝ) :=
     fun v i => v (Fin.natAdd (Untyped.numHoles s1) i)
   have hv1 : Measurable v1 := by
-    refine measurable_pi_iff.2 ?_
-    intro i
-    simpa [v1] using (measurable_pi_apply (Fin.castAdd (Untyped.numHoles s2) i))
+    exact measurable_pi_iff.2 (fun i => by
+      simpa [v1] using (measurable_pi_apply (Fin.castAdd (Untyped.numHoles s2) i)))
   have hv2 : Measurable v2 := by
-    refine measurable_pi_iff.2 ?_
-    intro i
-    simpa [v2] using (measurable_pi_apply (Fin.natAdd (Untyped.numHoles s1) i))
-  have hbind_let_of_meas
-      (μ : α → Measure Expr)
-      (hμ : Measurable μ) :
+    exact measurable_pi_iff.2 (fun i => by
+      simpa [v2] using (measurable_pi_apply (Fin.natAdd (Untyped.numHoles s1) i)))
+
+  -- Abbreviate filled subexpressions.
+  let e1 : α → Expr := fun v => Untyped.fillSkeleton s1 (v1 v)
+  let e2 : α → Expr := fun v => Untyped.fillSkeleton s2 (v2 v)
+  have he2 : Measurable e2 := by
+    simpa [e2] using ((fillSkeleton_measurable_skel s2).comp hv2)
+  have _ : Measurable (fun v : α => Untyped.step (Untyped.fillSkeleton s2 (v2 v))) := by
+    simpa [v2] using ih2.comp hv2
+  have hμ : Measurable (fun v : α => Untyped.step (e1 v)) := by
+    simpa [e1] using ih1.comp hv1
+  -- Measurability of the non-value branch: bind the step of `e1` and rebuild `letE`.
+  have hbind :
       Measurable
         (fun v : α =>
-          Dist.bind
-            (μ v)
-            (fun g => Dist.ret (Expr.letE x g (Untyped.fillSkeleton s2 (v2 v))))) :=
-    bind_ret_dep_measurable
-      (μ := μ) hμ
-      (f := fun v g => Expr.letE x g (Untyped.fillSkeleton s2 (v2 v)))
-      (hf := let_dep_uncurry_measurable x (e2 := fun v : α => Untyped.fillSkeleton s2 (v2 v)))
-  have hsubst_ret
-      (val : α → Expr) :
-      Measurable
-        (fun v : α =>
-          Dist.ret (subst x (val v) (Untyped.fillSkeleton s2 (v2 v)))) :=
-    subst_dep_ret_measurable x (v := val) (e2 := fun v : α => Untyped.fillSkeleton s2 (v2 v))
+          Dist.bind (Untyped.step (e1 v)) (fun g => Dist.ret (Expr.letE x g (e2 v)))) := by
+    letI : ∀ v : α, IsFiniteMeasure (Untyped.step (e1 v)) := fun v =>
+      ⟨lt_of_le_of_lt (step_untyped_is_subprob_measure (e1 v)) (by simp)⟩
+    letI : ∀ v : α, SFinite (Untyped.step (e1 v)) := fun v => inferInstance
+    exact
+      bind_is_measurable
+        hμ
+        (fun v : α => step_untyped_is_subprob_measure (e1 v))
+        (let_dep_uncurry_measurable x (e2 := e2) he2)
+  -- Measurability of the value branch: `ret (subst ...)`.
+  have hsubst :
+      Measurable (fun v : α => (Dist.ret (subst x (e1 v) (e2 v)) : Dist Expr)) :=
+    subst_dep_ret_measurable x (v := e1) (e2 := e2)
+
+  -- Finish by case-splitting on the shape of `s1`; this determines whether `isValue (e1 v)` is always true or false.
   cases s1 with
   | hole =>
       let i0 : Fin (Untyped.numHoles Untyped.Skeleton.hole) := ⟨0, by simp [Untyped.numHoles]⟩
-      simpa [Untyped.fillSkeleton, v1, v2, i0] using
-        (hsubst_ret (fun v : α => Expr.const ((v1 v) i0)))
-  | var y =>
-      let μ : α → Measure Expr := fun _ => Untyped.step (Expr.var y)
-      have hμ : Measurable μ := measurable_const
-      simpa [Untyped.fillSkeleton, v1, v2, μ] using hbind_let_of_meas μ hμ
+      simpa [e1, e2, Untyped.fillSkeleton, i0] using hsubst
+  | var _ =>
+      simpa [e1, e2, Untyped.fillSkeleton] using hbind
   | trueE =>
-      simpa [Untyped.fillSkeleton, v1, v2] using
-        (hsubst_ret (fun _ : α => Expr.trueE))
+      simpa [e1, e2, Untyped.fillSkeleton] using hsubst
   | falseE =>
-      simpa [Untyped.fillSkeleton, v1, v2] using
-        (hsubst_ret (fun _ : α => Expr.falseE))
-  | finconst n k =>
-      simpa [Untyped.fillSkeleton, v1, v2] using
-        (hsubst_ret (fun _ : α => Expr.finconst n k))
-  | discrete ps =>
-      let μ : α → Measure Expr := fun _ => Untyped.step (Expr.discrete ps)
-      have hμ : Measurable μ := measurable_const
-      simpa [Untyped.fillSkeleton, v1, v2, μ] using hbind_let_of_meas μ hμ
+      simpa [e1, e2, Untyped.fillSkeleton] using hsubst
+  | finconst _ _ =>
+      simpa [e1, e2, Untyped.fillSkeleton] using hsubst
+  | discrete _ =>
+      simpa [e1, e2, Untyped.fillSkeleton] using hbind
   | diverge =>
-      let μ : α → Measure Expr := fun _ => Untyped.step Expr.diverge
-      have hμ : Measurable μ := measurable_const
-      simpa [Untyped.fillSkeleton, v1, v2, μ] using hbind_let_of_meas μ hμ
-  | lt s11 s12 =>
-      let μ : α → Measure Expr := fun v => Untyped.step (Untyped.fillSkeleton (.lt s11 s12) (v1 v))
-      have hμ : Measurable μ := by
-        simpa [μ, Untyped.fillSkeleton] using ih1.comp hv1
-      simpa [Untyped.fillSkeleton, v1, v2, μ] using hbind_let_of_meas μ hμ
-  | ifE s11 s12 s13 =>
-      let μ : α → Measure Expr := fun v => Untyped.step (Untyped.fillSkeleton (.ifE s11 s12 s13) (v1 v))
-      have hμ : Measurable μ := by
-        simpa [μ, Untyped.fillSkeleton] using ih1.comp hv1
-      simpa [Untyped.fillSkeleton, v1, v2, μ] using hbind_let_of_meas μ hμ
-  | letE y s11 s12 =>
-      let μ : α → Measure Expr := fun v => Untyped.step (Untyped.fillSkeleton (.letE y s11 s12) (v1 v))
-      have hμ : Measurable μ := by
-        simpa [μ, Untyped.fillSkeleton] using ih1.comp hv1
-      simpa [Untyped.fillSkeleton, v1, v2, μ] using hbind_let_of_meas μ hμ
-  | uniform s11 s12 =>
-      let μ : α → Measure Expr := fun v => Untyped.step (Untyped.fillSkeleton (.uniform s11 s12) (v1 v))
-      have hμ : Measurable μ := by
-        simpa [μ, Untyped.fillSkeleton] using ih1.comp hv1
-      simpa [Untyped.fillSkeleton, v1, v2, μ] using hbind_let_of_meas μ hμ
+      simpa [e1, e2, Untyped.fillSkeleton] using hbind
+  | lt _ _ =>
+      simpa [e1, e2, Untyped.fillSkeleton] using hbind
+  | ifE _ _ _ =>
+      simpa [e1, e2, Untyped.fillSkeleton] using hbind
+  | letE _ _ _ =>
+      simpa [e1, e2, Untyped.fillSkeleton] using hbind
+  | uniform _ _ =>
+      simpa [e1, e2, Untyped.fillSkeleton] using hbind
 
+
+/-- Filling a uniform skeleton with a hole assignment v is measurable. -/
 lemma step_uniform_slice_measurable
     (s1 s2 : Untyped.Skeleton)
-    (ih1 : Measurable (fun v : Fin (Untyped.numHoles s1) → ℝ => Untyped.step (Untyped.fillSkeleton s1 v)))
-    (ih2 : Measurable (fun v : Fin (Untyped.numHoles s2) → ℝ => Untyped.step (Untyped.fillSkeleton s2 v))) :
+    (ih1 : Measurable (fun v : Fin (Untyped.numHoles s1) → ℝ =>
+      Untyped.step (Untyped.fillSkeleton s1 v)))
+    (ih2 : Measurable (fun v : Fin (Untyped.numHoles s2) → ℝ =>
+      Untyped.step (Untyped.fillSkeleton s2 v))) :
     Measurable (fun v : Fin (Untyped.numHoles s1 + Untyped.numHoles s2) → ℝ =>
       match Untyped.fillSkeleton s1 (fun i => v (Fin.castAdd (Untyped.numHoles s2) i)),
             Untyped.fillSkeleton s2 (fun i => v (Fin.natAdd (Untyped.numHoles s1) i)) with
@@ -955,32 +763,81 @@ lemma step_uniform_slice_measurable
             (fun g => Dist.ret (Expr.uniform g (Untyped.fillSkeleton s2 (fun i => v (Fin.natAdd (Untyped.numHoles s1) i)))))) := by
   classical
   let α := Fin (Untyped.numHoles s1 + Untyped.numHoles s2) → ℝ
+  -- Project one combined hole-assignment into left/right assignments.
   let v1 : α → (Fin (Untyped.numHoles s1) → ℝ) :=
     fun v i => v (Fin.castAdd (Untyped.numHoles s2) i)
   let v2 : α → (Fin (Untyped.numHoles s2) → ℝ) :=
     fun v i => v (Fin.natAdd (Untyped.numHoles s1) i)
   have hv1 : Measurable v1 := by
-    refine measurable_pi_iff.2 ?_
-    intro i
-    simpa [v1] using (measurable_pi_apply (Fin.castAdd (Untyped.numHoles s2) i))
+    exact measurable_pi_iff.2 (fun i => by
+      simpa [v1] using (measurable_pi_apply (Fin.castAdd (Untyped.numHoles s2) i)))
   have hv2 : Measurable v2 := by
-    refine measurable_pi_iff.2 ?_
-    intro i
-    simpa [v2] using (measurable_pi_apply (Fin.natAdd (Untyped.numHoles s1) i))
+    exact measurable_pi_iff.2 (fun i => by
+      simpa [v2] using (measurable_pi_apply (Fin.natAdd (Untyped.numHoles s1) i)))
+
+  -- Abbreviate filled left/right subexpressions and their stepped kernels.
+  let l : α → Expr := fun v => Untyped.fillSkeleton s1 (v1 v)
+  let r : α → Expr := fun v => Untyped.fillSkeleton s2 (v2 v)
+  have hμl : Measurable (fun v : α => Untyped.step (l v)) := by
+    simpa [l] using ih1.comp hv1
+  have hμr : Measurable (fun v : α => Untyped.step (r v)) := by
+    simpa [r] using ih2.comp hv2
+
+  -- Split on whether the left skeleton is a hole (so left side is definitely const).
   by_cases hs1 : s1 = Untyped.Skeleton.hole
   · subst hs1
     let i0 : Fin (Untyped.numHoles Untyped.Skeleton.hole) := ⟨0, by simp [Untyped.numHoles]⟩
+    -- If both are holes, use the dedicated measurable lemma for the const/const uniform branch.
     by_cases hs2 : s2 = Untyped.Skeleton.hole
     · subst hs2
       let j0 : Fin (Untyped.numHoles Untyped.Skeleton.hole) := ⟨0, by simp [Untyped.numHoles]⟩
-      simpa [v1, v2, i0, j0, Untyped.fillSkeleton] using
+      simpa [l, r, v1, v2, i0, j0, Untyped.fillSkeleton] using
         (uniform_const_const_branch_measurable
           (lo := fun v : α => (v1 v) i0)
           (hi := fun v : α => (v2 v) j0))
+    -- Left is const, right is never const: collapse to the right-bind branch.
     · have hEq :
+          (fun v : α =>
+            match l v, r v with
+            | Expr.const v1, Expr.const v2 =>
+                if v1 ≤ v2 then
+                  Dist.bind (ProbabilityTheory.cond MeasureTheory.volume (Set.Icc v1 v2))
+                    (fun r => Dist.ret (Expr.const r))
+                else
+                  Dist.ret Expr.diverge
+            | Expr.const v1, _ =>
+                Dist.bind (Untyped.step (r v)) (fun g => Dist.ret (Expr.uniform (.const v1) g))
+            | _, _ =>
+                Dist.bind (Untyped.step (l v)) (fun g => Dist.ret (Expr.uniform g (r v))))
+          =
+          (fun v : α =>
+            Dist.bind (Untyped.step (r v))
+              (fun g => Dist.ret (Expr.uniform (.const ((v1 v) i0)) g))) := by
+        funext v
+        have hnot2 : ¬ ∃ rr : ℝ, Untyped.fillSkeleton s2 (v2 v) = Expr.const rr :=
+          fillSkeleton_not_const_of_ne_hole hs2 (v2 v)
+        cases hr : r v with
+        | const rr =>
+            exact False.elim (hnot2 ⟨rr, by simpa [r] using hr⟩)
+        | var _ | trueE | falseE | finconst _ _ | discrete _ | diverge
+          | letE _ _ _ | lt _ _ | ifE _ _ _ | uniform _ _ =>
+            simp [l, r, Untyped.fillSkeleton, i0, hr]
+      rw [hEq]
+      -- Final closure: measurable input kernel + measurable `(v,g) ↦ uniform (const ...) g`.
+      letI : ∀ v : α, IsFiniteMeasure (Untyped.step (r v)) := fun v =>
+        ⟨lt_of_le_of_lt (step_untyped_is_subprob_measure (r v)) (by simp)⟩
+      letI : ∀ v : α, SFinite (Untyped.step (r v)) := fun v => inferInstance
+      exact
+        bind_is_measurable
+          hμr
+          (fun v : α => step_untyped_is_subprob_measure (r v))
+          (uniform_right_dep_uncurry_measurable
+            (r := fun v : α => (v1 v) i0)
+            ((measurable_pi_apply i0).comp hv1))
+  -- Left is never const: collapse to the fallback left-bind branch.
+  · have hEq :
         (fun v : α =>
-          match Untyped.fillSkeleton Untyped.Skeleton.hole (v1 v),
-                Untyped.fillSkeleton s2 (v2 v) with
+          match l v, r v with
           | Expr.const v1, Expr.const v2 =>
               if v1 ≤ v2 then
                 Dist.bind (ProbabilityTheory.cond MeasureTheory.volume (Set.Icc v1 v2))
@@ -988,91 +845,35 @@ lemma step_uniform_slice_measurable
               else
                 Dist.ret Expr.diverge
           | Expr.const v1, _ =>
-              Dist.bind
-                (Untyped.step (Untyped.fillSkeleton s2 (v2 v)))
-                (fun g => Dist.ret (Expr.uniform (.const v1) g))
+              Dist.bind (Untyped.step (r v)) (fun g => Dist.ret (Expr.uniform (.const v1) g))
           | _, _ =>
-              Dist.bind
-                (Untyped.step (Untyped.fillSkeleton Untyped.Skeleton.hole (v1 v)))
-                (fun g => Dist.ret (Expr.uniform g (Untyped.fillSkeleton s2 (v2 v)))))
+              Dist.bind (Untyped.step (l v)) (fun g => Dist.ret (Expr.uniform g (r v))))
         =
         (fun v : α =>
-          Dist.bind
-            (Untyped.step (Untyped.fillSkeleton s2 (v2 v)))
-            (fun g =>
-              Dist.ret (Expr.uniform (.const ((v1 v) i0)) g))) := by
-        funext v
-        have hnot2 : ¬ ∃ r : ℝ, Untyped.fillSkeleton s2 (v2 v) = Expr.const r :=
-          fillSkeleton_not_const_of_ne_hole hs2 (v2 v)
-        cases h2 : Untyped.fillSkeleton s2 (v2 v) with
-        | const r =>
-            exact (False.elim (hnot2 ⟨r, h2⟩))
-        | var _ | trueE | falseE | finconst _ _ | discrete _ | diverge
-          | letE _ _ _ | lt _ _ | ifE _ _ _ | uniform _ _ =>
-            simpa [Untyped.fillSkeleton, i0]
-      rw [hEq]
-      let μ : α → Measure Expr := fun v => Untyped.step (Untyped.fillSkeleton s2 (v2 v))
-      have hμ : Measurable μ := by
-        simpa [μ] using ih2.comp hv2
-      have hbind :
-          Measurable
-            (fun v : α =>
-              Dist.bind
-                (μ v)
-                (fun g => Dist.ret (Expr.uniform (.const ((v1 v) i0)) g))) :=
-        bind_ret_dep_measurable
-          (μ := μ) hμ
-          (f := fun v g => Expr.uniform (.const ((v1 v) i0)) g)
-          (hf := uniform_right_dep_uncurry_measurable (r := fun v : α => (v1 v) i0))
-      simpa [μ] using hbind
-  · have hEq :
-      (fun v : α =>
-        match Untyped.fillSkeleton s1 (v1 v),
-              Untyped.fillSkeleton s2 (v2 v) with
-        | Expr.const v1, Expr.const v2 =>
-            if v1 ≤ v2 then
-              Dist.bind (ProbabilityTheory.cond MeasureTheory.volume (Set.Icc v1 v2))
-                (fun r => Dist.ret (Expr.const r))
-            else
-              Dist.ret Expr.diverge
-        | Expr.const v1, _ =>
-            Dist.bind
-              (Untyped.step (Untyped.fillSkeleton s2 (v2 v)))
-              (fun g => Dist.ret (Expr.uniform (.const v1) g))
-        | _, _ =>
-            Dist.bind
-              (Untyped.step (Untyped.fillSkeleton s1 (v1 v)))
-              (fun g => Dist.ret (Expr.uniform g (Untyped.fillSkeleton s2 (v2 v)))))
-      =
-      (fun v : α =>
-        Dist.bind
-          (Untyped.step (Untyped.fillSkeleton s1 (v1 v)))
-          (fun g => Dist.ret (Expr.uniform g (Untyped.fillSkeleton s2 (v2 v))))) := by
+          Dist.bind (Untyped.step (l v)) (fun g => Dist.ret (Expr.uniform g (r v)))) := by
       funext v
-      have hnot1 : ¬ ∃ r : ℝ, Untyped.fillSkeleton s1 (v1 v) = Expr.const r :=
+      have hnot1 : ¬ ∃ rr : ℝ, Untyped.fillSkeleton s1 (v1 v) = Expr.const rr :=
         fillSkeleton_not_const_of_ne_hole hs1 (v1 v)
-      cases h1 : Untyped.fillSkeleton s1 (v1 v) <;> simp [h1] at hnot1 ⊢
+      cases hl : l v with
+      | const rr =>
+          exact False.elim (hnot1 ⟨rr, by simpa [l] using hl⟩)
+      | var _ | trueE | falseE | finconst _ _ | discrete _ | diverge
+        | letE _ _ _ | lt _ _ | ifE _ _ _ | uniform _ _ =>
+          simp [l, r, hl]
     rw [hEq]
-    let μ : α → Measure Expr := fun v => Untyped.step (Untyped.fillSkeleton s1 (v1 v))
-    have hμ : Measurable μ := by
-      simpa [μ] using ih1.comp hv1
-    have hbind :
-        Measurable
-          (fun v : α =>
-            Dist.bind
-              (μ v)
-              (fun g => Dist.ret (Expr.uniform g (Untyped.fillSkeleton s2 (v2 v))))) :=
-      bind_ret_dep_measurable
-        (μ := μ) hμ
-        (f := fun v g => Expr.uniform g (Untyped.fillSkeleton s2 (v2 v)))
-        (hf := uniform_left_dep_uncurry_measurable
-          (e2 := fun v : α => Untyped.fillSkeleton s2 (v2 v)))
-    simpa [μ] using hbind
-
+    have hr : Measurable r := by
+      simpa [r] using ((fillSkeleton_measurable_skel s2).comp hv2)
+    -- Final closure: measurable input kernel + measurable `(v,g) ↦ uniform g (r v)`.
+    exact
+      bind_is_measurable
+        hμl
+        (fun v : α => step_untyped_is_subprob_measure (l v))
+        (uniform_left_dep_uncurry_measurable (e2 := r) hr)
 
 lemma step_untyped_measurable :
     Measurable (fun e : Expr => Untyped.step e) := by
-  refine measurable_of_slices ?_
+  apply fillSkeleton_measurable_expr (f := fun e : Expr => Untyped.step e)
+  -- this changes the goal from global Measurable (fun e => Untyped.step e) to: for each skeleton σ, prove measurability of v ↦ Untyped.step (Untyped.fillSkeleton σ v).
   intro σ
   induction σ with
   | hole =>
@@ -1092,133 +893,21 @@ lemma step_untyped_measurable :
   | lt s1 s2 ih1 ih2 =>
       simpa [Untyped.step, Untyped.fillSkeleton] using
         step_lt_slice_measurable s1 s2 ih1 ih2
-  | ifE s1 s2 s3 ih1 ih2 ih3 =>
+  | ifE s1 s2 s3 ih1 _ _ =>
       simpa [Untyped.step, Untyped.fillSkeleton] using
-        step_if_slice_measurable s1 s2 s3 ih1 ih2 ih3
-  | letE x s1 s2 ih1 _ =>
+        step_if_slice_measurable s1 s2 s3 ih1
+  | letE x s1 s2 ih1 ih2 =>
       simpa [Untyped.step, Untyped.fillSkeleton] using
-        step_let_slice_measurable x s1 s2 ih1
+        step_let_slice_measurable x s1 s2 ih1 ih2
   | uniform s1 s2 ih1 ih2 =>
       simpa [Untyped.step, Untyped.fillSkeleton] using
         step_uniform_slice_measurable s1 s2 ih1 ih2
 
 lemma step_untyped_is_subMarkovKernel :
     IsSubMarkovKernel (fun e : Expr => Untyped.step e) := by
-  have bind_is_subprob_measure
-      {α β : Type} [MeasurableSpace α] [MeasurableSpace β]
-      {μ : Measure α} {k : α → Measure β}
-      (hμ : IsSubProbabilityMeasure μ)
-      (hk : ∀ x, IsSubProbabilityMeasure (k x))
-      (hkm : Measurable k) :
-      IsSubProbabilityMeasure (Dist.bind μ k) := by
-    unfold IsSubProbabilityMeasure at hμ hk ⊢
-    rw [Dist.bind_is_measure_bind, Measure.bind_apply MeasurableSet.univ hkm.aemeasurable]
-    calc
-      ∫⁻ x, k x Set.univ ∂μ ≤ ∫⁻ _, 1 ∂μ := lintegral_mono (fun x => hk x)
-      _ = μ Set.univ := by simp
-      _ ≤ 1 := hμ
-  refine ⟨step_untyped_measurable, ?_⟩
-  intro e
-  induction e with
-  | diverge =>
-      simp [Untyped.step, IsSubProbabilityMeasure]
-  | const _ | finconst _ _ | trueE | falseE | var _ =>
-      simp [Untyped.step, IsSubProbabilityMeasure, Dist.ret_is_dirac]
-  | discrete ps =>
-      simp only [Untyped.step]
-      let n := ps.1.length
-      let discreteMeasure : Dist (Fin n) :=
-        Finset.univ.sum (fun i : Fin n => (ps.1.get i) • Dist.ret i)
-      exact bind_is_subprob_measure
-        (hμ := by
-          unfold IsSubProbabilityMeasure
-          simpa [discreteMeasure, n, Dist.ret_is_dirac, ps.2] using
-            (le_rfl : (1 : ENNReal) ≤ 1))
-        (hk := by
-          intro i
-          simp [IsSubProbabilityMeasure, Dist.ret_is_dirac])
-        (hkm := by
-          simpa [Dist.ret_is_dirac] using
-            (MeasureTheory.Measure.measurable_dirac.comp (finconst_wrap_measurable n)))
-  | letE x e1 e2 ih1 _ =>
-      simp only [Untyped.step]
-      split_ifs with hv
-      · simp [IsSubProbabilityMeasure, Dist.ret_is_dirac]
-      · exact bind_is_subprob_measure
-          (hμ := ih1)
-          (hk := by
-            intro g
-            simp [IsSubProbabilityMeasure, Dist.ret_is_dirac])
-          (hkm := by
-            simpa [Dist.ret_is_dirac] using
-              (MeasureTheory.Measure.measurable_dirac.comp (let_wrap_measurable x e2)))
-  | ifE e1 e2 e3 ih1 _ _ =>
-      simp only [Untyped.step]
-      split
-      · simp [IsSubProbabilityMeasure, Dist.ret_is_dirac]
-      · simp [IsSubProbabilityMeasure, Dist.ret_is_dirac]
-      · exact bind_is_subprob_measure
-          (hμ := ih1)
-          (hk := by
-            intro g
-            simp [IsSubProbabilityMeasure, Dist.ret_is_dirac])
-          (hkm := by
-            simpa [Dist.ret_is_dirac] using
-              (MeasureTheory.Measure.measurable_dirac.comp (if_wrap_measurable e2 e3)))
-  | lt e1 e2 ih1 ih2 =>
-      simp only [Untyped.step]
-      split
-      · split
-        · simp [IsSubProbabilityMeasure, Dist.ret_is_dirac]
-        · simp [IsSubProbabilityMeasure, Dist.ret_is_dirac]
-      · exact bind_is_subprob_measure
-          (hμ := ih2)
-          (hk := by
-            intro g
-            simp [IsSubProbabilityMeasure, Dist.ret_is_dirac])
-          (hkm := by
-            simpa [Dist.ret_is_dirac] using
-              (MeasureTheory.Measure.measurable_dirac.comp (lt_right_wrap_measurable _)))
-      · exact bind_is_subprob_measure
-          (hμ := ih1)
-          (hk := by
-            intro g
-            simp [IsSubProbabilityMeasure, Dist.ret_is_dirac])
-          (hkm := by
-            simpa [Dist.ret_is_dirac] using
-              (MeasureTheory.Measure.measurable_dirac.comp (lt_left_wrap_measurable e2)))
-  | uniform e1 e2 ih1 ih2 =>
-      simp only [Untyped.step]
-      split
-      · split
-        · exact bind_is_subprob_measure
-            (hμ := by
-              unfold IsSubProbabilityMeasure
-              simpa using
-                prob_le_one (μ := ProbabilityTheory.cond MeasureTheory.volume (Set.Icc _ _))
-                  (s := Set.univ))
-            (hk := by
-              intro r
-              simp [IsSubProbabilityMeasure, Dist.ret_is_dirac])
-            (hkm := by
-              simpa [Dist.ret_is_dirac] using
-                (MeasureTheory.Measure.measurable_dirac.comp const_wrap_measurable))
-        · simp [IsSubProbabilityMeasure, Dist.ret_is_dirac]
-      · exact bind_is_subprob_measure
-          (hμ := ih2)
-          (hk := by
-            intro g
-            simp [IsSubProbabilityMeasure, Dist.ret_is_dirac])
-          (hkm := by
-            simpa [Dist.ret_is_dirac] using
-              (MeasureTheory.Measure.measurable_dirac.comp (uniform_right_wrap_measurable _)))
-      · exact bind_is_subprob_measure
-          (hμ := ih1)
-          (hk := by
-            intro g
-            simp [IsSubProbabilityMeasure, Dist.ret_is_dirac])
-          (hkm := by
-            simpa [Dist.ret_is_dirac] using
-              (MeasureTheory.Measure.measurable_dirac.comp (uniform_left_wrap_measurable e2)))
+  exact ⟨step_untyped_measurable, step_untyped_is_subprob_measure⟩
+
+lemma step_is_subMarkovKernel {τ : Ty} :
+    IsSubMarkovKernel (fun e : ExprsOfType τ => step e) := by sorry
 
 end Slice

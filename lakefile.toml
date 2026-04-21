@@ -24,7 +24,7 @@ name = "Syntax"
 name = "Skeleton"
 
 [[lean_lib]]
-name = "Topology"
+name = "Measurable"
 
 [[lean_lib]]
 name = "SmallStep"

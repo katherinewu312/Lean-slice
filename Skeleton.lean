@@ -345,19 +345,6 @@ noncomputable instance exprsOfSkel_measurableSpace (σ : Skeleton) :
     MeasurableSpace (ExprsOfSkel σ) :=
   MeasurableSpace.comap (exprsOfSkel_equiv σ) inferInstance
 
-noncomputable instance exprsOfSkel_measurableSingletonClass (σ : Skeleton) :
-    MeasurableSingletonClass (ExprsOfSkel σ) where
-  measurableSet_singleton x := by
-    change ∃ s', MeasurableSet s' ∧ (exprsOfSkel_equiv σ) ⁻¹' s' = ({x} : Set (ExprsOfSkel σ))
-    refine ⟨{exprsOfSkel_equiv σ x}, measurableSet_singleton _, ?_⟩
-    ext y
-    constructor
-    · intro hy
-      apply (exprsOfSkel_equiv σ).injective
-      simpa [Set.mem_singleton_iff] using hy
-    · intro hy
-      simpa [Set.mem_singleton_iff, hy]
-
 -- Take disjoint union of exprsOfSkel to obtain Expr measurable.
 instance expr_measurableSpace : MeasurableSpace Expr where
   MeasurableSet' S :=
@@ -378,42 +365,6 @@ instance expr_measurableSpace : MeasurableSpace Expr where
       ext ⟨e, he⟩; simp [Set.mem_iUnion]
     rw [this]
     exact MeasurableSet.iUnion (fun i => hf i σ)
-
-instance expr_measurableSingletonClass : MeasurableSingletonClass Expr where
-  measurableSet_singleton e := by
-    intro σ
-    by_cases hs : skeletonOf e = σ
-    · let pe : ExprsOfSkel σ := ⟨e, hs⟩
-      have hset :
-          { p : ExprsOfSkel σ | p.1 ∈ ({e} : Set Expr) } =
-            ({pe} : Set (ExprsOfSkel σ)) := by
-        ext p
-        constructor
-        · intro hp
-          apply Set.mem_singleton_iff.mpr
-          apply Subtype.ext
-          simpa [Set.mem_singleton_iff] using hp
-        · intro hp
-          rcases Set.mem_singleton_iff.mp hp with rfl
-          simp [pe]
-      have hmeas : MeasurableSet (({pe} : Set (ExprsOfSkel σ))) :=
-        measurableSet_singleton pe
-      exact hset ▸ hmeas
-    · have hset :
-          { p : ExprsOfSkel σ | p.1 ∈ ({e} : Set Expr) } =
-            (∅ : Set (ExprsOfSkel σ)) := by
-        ext p
-        constructor
-        · intro hp
-          have hpe : p.1 = e := by
-            simpa [Set.mem_singleton_iff] using hp
-          have : skeletonOf e = σ := by
-            simpa [hpe] using p.2
-          exact (hs this).elim
-        · intro hp
-          exact False.elim (Set.notMem_empty p hp)
-      have hmeas : MeasurableSet (∅ : Set (ExprsOfSkel σ)) := MeasurableSet.empty
-      exact hset ▸ hmeas
 
 end Untyped
 
@@ -631,10 +582,5 @@ noncomputable instance exprsOfSkel_measurableSpace {τ : Ty} (σ : SkeletonsOfTy
 noncomputable instance exprsOfType_measurableSpace (τ : Ty) :
     MeasurableSpace (ExprsOfType τ) :=
   MeasurableSpace.comap (fun ⟨e, _⟩ => e) Untyped.expr_measurableSpace
-
-lemma measurable_of_slices {β : Type} [MeasurableSpace β] {f : Expr → β}
-    (h : ∀ σ : Untyped.Skeleton,
-      Measurable (fun v : Fin (Untyped.numHoles σ) → ℝ => f (Untyped.fillSkeleton σ v))) :
-    Measurable f := by sorry
 
 end Slice
