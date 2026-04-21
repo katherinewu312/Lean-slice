@@ -8,7 +8,6 @@ import TypeSystem
 namespace Slice
 
 open MeasureTheory ProbabilityTheory
-open scoped Topology
 
 -- ------------------------------------------------------------------------
 -- Helper lemmas regarding measurable functions.
