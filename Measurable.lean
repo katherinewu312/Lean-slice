@@ -513,12 +513,12 @@ lemma let_dep_uncurry_measurable
   simpa [Function.uncurry] using hbase.comp hargs
 
 /-- Measurability of `a ↦ ret (subst x (v a) (e₂ a))`. -/
-axiom subst_dep_ret_measurable
+lemma subst_dep_ret_measurable
     {α : Type}
     [MeasurableSpace α]
     (x : String)
     {v e2 : α → Expr} :
-    Measurable (fun a : α => (Dist.ret (subst x (v a) (e2 a)) : Dist Expr))
+    Measurable (fun a : α => (Dist.ret (subst x (v a) (e2 a)) : Dist Expr)) := by sorry
 
 
 -- Measurable lemmas
@@ -604,10 +604,16 @@ lemma uniform_right_wrap_measurable (v1 : ℝ) :
 
 lemma const_wrap_measurable :
     Measurable (fun r : ℝ => Expr.const r) := by
-  sorry
+  have hconstVec :
+      Measurable (fun r : ℝ => (fun _ : Fin (Untyped.numHoles Untyped.Skeleton.hole) => r)) := by
+    refine measurable_pi_iff.2 ?_
+    intro i
+    simpa using (measurable_id : Measurable (fun r : ℝ => r))
+  simpa [Untyped.fillSkeleton] using
+    ((fillSkeleton_measurable_skel (σ := Untyped.Skeleton.hole)).comp hconstVec)
 
 lemma finconst_wrap_measurable (n : Nat) :
     Measurable (fun i : Fin n => Expr.finconst n i) := by
-  sorry
+  exact measurable_of_finite (fun i : Fin n => Expr.finconst n i)
 
 end Slice

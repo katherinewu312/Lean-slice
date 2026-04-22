@@ -80,8 +80,7 @@ def isValue : Expr → Bool
   -/
   | _             => false
 
-/-- Capture-avoiding substitution (alpha-renaming assumed). -/
-partial def subst (x : String) (v : Expr) : Expr → Expr
+def subst (x : String) (v : Expr) : Expr → Expr
   | .var y          => if x = y then v else .var y
   | .const r        => .const r
   | .trueE          => .trueE
