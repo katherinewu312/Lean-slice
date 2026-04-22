@@ -41,8 +41,8 @@ inductive HasType : Ctx → Expr → Ty → Prop where
   | finconst {Γ : Ctx} {n : Nat} (k : Fin n) :
       HasType Γ (.finconst n k) (.fin n)
 
-  | discrete {Γ : Ctx} {ps : DiscreteProbs} :
-      HasType Γ (.discrete ps) (.fin ps.1.length)
+  | discrete {Γ : Ctx} {d : DiscreteParam} :
+      HasType Γ (.discrete d) (.fin (discreteProbsOf d).1.length)
 
   | diverge {Γ : Ctx} {τ : Ty} :
       HasType Γ .diverge τ
@@ -75,31 +75,6 @@ def WellTyped (e : Expr) : Prop :=
 /-- Well-typed expressions of type τ in the empty context. -/
 def ExprsOfType (τ : Ty) : Type :=
   {e : Expr // HasType Ctx.empty e τ}
-
-/-- Inversion lemmas for HasType -/
-lemma hasType_letE_inv {Γ : Ctx} {x : String} {e1 e2 : Expr} {τ : Ty}
-    (h : HasType Γ (.letE x e1 e2) τ) :
-    ∃ τ1, HasType Γ e1 τ1 ∧ HasType (Ctx.extend Γ x τ1) e2 τ := by
-  cases h with
-  | letE h1 h2 => exact ⟨_, h1, h2⟩
-
-lemma hasType_ifE_inv {Γ : Ctx} {c t f : Expr} {τ : Ty}
-    (h : HasType Γ (.ifE c t f) τ) :
-    HasType Γ c .bool ∧ HasType Γ t τ ∧ HasType Γ f τ := by
-  cases h with
-  | ifE hc ht hf => exact ⟨hc, ht, hf⟩
-
-lemma hasType_lt_inv {Γ : Ctx} {e1 e2 : Expr} {τ : Ty}
-    (h : HasType Γ (.lt e1 e2) τ) :
-    τ = .bool ∧ HasType Γ e1 .real ∧ HasType Γ e2 .real := by
-  cases h with
-  | lt h1 h2 => exact ⟨rfl, h1, h2⟩
-
-lemma hasType_uniform_inv {Γ : Ctx} {e1 e2 : Expr} {τ : Ty}
-    (h : HasType Γ (.uniform e1 e2) τ) :
-    τ = .real ∧ HasType Γ e1 .real ∧ HasType Γ e2 .real := by
-  cases h with
-  | uniform h1 h2 => exact ⟨rfl, h1, h2⟩
 
 /-- Substitution preserves typing -/
 lemma subst_preserves_type {Γ : Ctx} {x : String} {v e : Expr} {τ τ2 : Ty}

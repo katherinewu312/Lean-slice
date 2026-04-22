@@ -26,10 +26,6 @@ noncomputable def bind {α β : Type} [MeasurableSpace α] [MeasurableSpace β]
     (μ : Dist α) (k : α → Dist β) : Dist β :=
   Measure.bind μ k
 
-/-- The support of a distribution. -/
-abbrev support {α : Type} [TopologicalSpace α] [MeasurableSpace α] (μ : Dist α) : Set α :=
-  Measure.support μ
-
 /-- Dist.ret is exactly Measure.dirac -/
 @[simp] theorem ret_is_dirac {α : Type} [MeasurableSpace α] (a : α) :
     Dist.ret a = Measure.dirac a := rfl
@@ -39,11 +35,6 @@ abbrev support {α : Type} [TopologicalSpace α] [MeasurableSpace α] (μ : Dist
     {α β : Type} [MeasurableSpace α] [MeasurableSpace β]
     (μ : Dist α) (k : α → Dist β) :
     Dist.bind μ k = Measure.bind μ k := rfl
-
-@[simp] theorem support_zero
-    {α : Type} [TopologicalSpace α] [MeasurableSpace α] :
-    (0 : Dist α).support = ∅ := by
-  simpa [support]
 
 end Dist
 end Slice

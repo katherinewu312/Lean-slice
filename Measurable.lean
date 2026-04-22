@@ -34,13 +34,14 @@ lemma fillSkeleton_measurable_skel (σ : Untyped.Skeleton) :
   simpa [Untyped.exprsOfSkel_equiv, Untyped.fillSkeleton] using h
 
 /-- If each skeleton-indexed hole map `v ↦ f (fillSkeleton σ v)` is measurable, then `f` is measurable on `Expr`.
-This is proved by showing: For every measurable set s : Set β, and every skeleton σ, the set of expressions in that σ that land in s under f comes from a measurable set of hole assignments. -/
-lemma fillSkeleton_measurable_expr {β : Type} [MeasurableSpace β]
+This is proved by showing: For every measurable set `s` and every skeleton `σ`, the set of expressions in that `σ`-slice that land in `s` under `f` comes from a measurable set of hole assignments. -/
+lemma fillSkeleton_measurable_expr
+    {β : Type} [MeasurableSpace β]
     (f : Expr → β)
     (h : ∀ σ : Untyped.Skeleton,
       Measurable
         (fun v : (Fin (Untyped.numHoles σ) → ℝ) =>
-          (f (Untyped.fillSkeleton σ v) : β))) :
+          f (Untyped.fillSkeleton σ v))) :
     Measurable f := by
   intro s hs σ
   refine ⟨
@@ -54,16 +55,109 @@ lemma fillSkeleton_measurable_expr {β : Type} [MeasurableSpace β]
           congrArg Subtype.val ((Untyped.exprsOfSkel_equiv σ).left_inv p)
       simp [Set.preimage, hfill]⟩
 
-/-- Product-domain slice criterion: measurability in `α × Expr` from measurable right-slices. -/
+/-- A measurable embedding is a function that is: injective, measurable, and whose measurable sets stay measurale when you push them forward along the map. -/
+lemma fillSkeleton_measurableEmbedding (σ : Untyped.Skeleton) :
+    MeasurableEmbedding
+      (fun v : (Fin (Untyped.numHoles σ) → ℝ) =>
+        (Untyped.fillSkeleton σ v : Expr)) := by
+  refine ⟨Untyped.fillSkeleton_injective σ, fillSkeleton_measurable_skel σ, ?_⟩
+  intro s hs τ
+  by_cases hτσ : τ = σ
+  · cases hτσ
+    have hset :
+        {p : Untyped.ExprsOfSkel σ | p.1 ∈ Untyped.fillSkeleton σ '' s} =
+          {p : Untyped.ExprsOfSkel σ | Untyped.exprsOfSkel_equiv σ p ∈ s} := by
+      ext p
+      constructor
+      · intro hp
+        rcases hp with ⟨v, hvs, hvp⟩
+        have hfill :
+            Untyped.fillSkeleton σ (Untyped.exprsOfSkel_equiv σ p) = p.1 := by
+          simpa [Untyped.exprsOfSkel_equiv] using
+            congrArg Subtype.val ((Untyped.exprsOfSkel_equiv σ).left_inv p)
+        have hvEq : v = Untyped.exprsOfSkel_equiv σ p := by
+          apply Untyped.fillSkeleton_injective σ
+          simpa [hfill] using hvp
+        simpa [hvEq] using hvs
+      · intro hp
+        have hfill :
+            Untyped.fillSkeleton σ (Untyped.exprsOfSkel_equiv σ p) = p.1 := by
+          simpa [Untyped.exprsOfSkel_equiv] using
+            congrArg Subtype.val ((Untyped.exprsOfSkel_equiv σ).left_inv p)
+        exact ⟨Untyped.exprsOfSkel_equiv σ p, hp, by simpa [hfill]⟩
+    rw [MeasurableSpace.measurableSet_comap]
+    refine ⟨s, hs, ?_⟩
+    have hset' :
+        {p : Untyped.ExprsOfSkel σ | (∃ x ∈ s, Untyped.fillSkeleton σ x = p.1)} =
+          {p : Untyped.ExprsOfSkel σ | Untyped.exprsOfSkel_equiv σ p ∈ s} := by
+      simpa [Set.mem_image] using hset
+    simpa [Set.preimage, hset']
+  · have hempty :
+        {p : Untyped.ExprsOfSkel τ | p.1 ∈ Untyped.fillSkeleton σ '' s} = ∅ := by
+      ext p
+      constructor
+      · intro hp
+        rcases hp with ⟨v, hvs, hvp⟩
+        have hτσ' : τ = σ := by
+          calc
+            τ = Untyped.skeletonOf p.1 := by simpa using p.2.symm
+            _ = Untyped.skeletonOf (Untyped.fillSkeleton σ v) := by simpa [hvp]
+            _ = σ := Untyped.skeletonOf_fillSkeleton σ v
+        exact (hτσ hτσ').elim
+      · intro hp
+        exact False.elim (by simpa using hp)
+    rw [MeasurableSpace.measurableSet_comap]
+    refine ⟨∅, MeasurableSet.empty, ?_⟩
+    simpa [Set.mem_image] using hempty.symm
+
+lemma fillSkeleton_prod_measurableEmbedding
+    {α : Type} [MeasurableSpace α] :
+    ∀ σ : Untyped.Skeleton,
+      MeasurableEmbedding
+        (fun p : α × (Fin (Untyped.numHoles σ) → ℝ) =>
+          (p.1, Untyped.fillSkeleton σ p.2)) := by
+  intro σ
+  simpa [Prod.map] using
+    (MeasurableEmbedding.id.prodMap
+      (fillSkeleton_measurableEmbedding σ))
+
 lemma measurable_of_slices_prod_right
     {α β : Type} [MeasurableSpace α] [MeasurableSpace β]
+    [Countable Untyped.Skeleton]
     {f : α × Expr → β}
     (h : ∀ σ : Untyped.Skeleton,
       Measurable
         (fun p : α × (Fin (Untyped.numHoles σ) → ℝ) =>
           f (p.1, Untyped.fillSkeleton σ p.2))) :
     Measurable f := by
-  sorry
+  classical
+  let i : (σ : Untyped.Skeleton) →
+      α × (Fin (Untyped.numHoles σ) → ℝ) → α × Expr :=
+    fun σ p => (p.1, Untyped.fillSkeleton σ p.2)
+  intro s hs
+  have hP :
+      f ⁻¹' s =
+        ⋃ σ : Untyped.Skeleton,
+          i σ '' {p : α × (Fin (Untyped.numHoles σ) → ℝ) | i σ p ∈ f ⁻¹' s} := by
+    ext x
+    constructor
+    · intro hx
+      refine Set.mem_iUnion.2 ?_
+      refine ⟨Untyped.skeletonOf x.2, ?_⟩
+      refine ⟨(x.1, Untyped.holeValues x.2), ?_, ?_⟩
+      · simpa [i, Untyped.fillSkeleton_holeValues] using hx
+      · simp [i, Untyped.fillSkeleton_holeValues]
+    · intro hx
+      rcases Set.mem_iUnion.1 hx with ⟨σ, hxσ⟩
+      rcases hxσ with ⟨p, hpP, rfl⟩
+      exact hpP
+  rw [hP]
+  refine MeasurableSet.iUnion ?_
+  intro σ
+  have hpre :
+      MeasurableSet {p : α × (Fin (Untyped.numHoles σ) → ℝ) | i σ p ∈ f ⁻¹' s} := by
+    simpa [i, Set.preimage] using (h σ) hs
+  exact (fillSkeleton_prod_measurableEmbedding (α := α) σ).measurableSet_image' hpre
 
 
 

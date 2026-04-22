@@ -1,11 +1,15 @@
 import Syntax
 import TypeSystem
+import Mathlib.Tactic.DeriveCountable
 
 namespace Slice
 
 open MeasureTheory ProbabilityTheory
 
 namespace Untyped
+
+axiom string_countable : Countable String
+attribute [instance] string_countable
 
 --- Expression skeletons
 --- A skeleton is syntactically identical to Expr except that every const r is replaced by a hole. Formally, this is the paper's set Skel.
@@ -15,13 +19,16 @@ inductive Skeleton : Type where
   | trueE : Skeleton
   | falseE : Skeleton
   | finconst : (n : ℕ) → Fin n → Skeleton
-  | discrete : DiscreteProbs → Skeleton
+  | discrete : DiscreteParam → Skeleton
   | diverge : Skeleton
   | lt : Skeleton → Skeleton → Skeleton
   | ifE : Skeleton → Skeleton → Skeleton → Skeleton
   | letE : String → Skeleton → Skeleton → Skeleton
   | uniform : Skeleton → Skeleton → Skeleton
   -- etc.
+
+-- The set of skeletons is countable.
+deriving instance Countable for Skeleton
 
 --- Number of holes in a skeleton
 def numHoles : Skeleton → ℕ
@@ -366,6 +373,11 @@ instance expr_measurableSpace : MeasurableSpace Expr where
     rw [this]
     exact MeasurableSet.iUnion (fun i => hf i σ)
 
+-- ---------------------------------------------------------------------------
+-- Countability helpers (untyped)
+-- ---------------------------------------------------------------------------
+
+
 end Untyped
 
 -- ---------------------------------------------------------------------------
@@ -390,8 +402,8 @@ inductive HasTypeSkel : Ctx → Untyped.Skeleton → Ty → Prop where
   | finconst {Γ : Ctx} {n : Nat} (k : Fin n) :
       HasTypeSkel Γ (.finconst n k) (.fin n)
 
-  | discrete {Γ : Ctx} {ps : DiscreteProbs} :
-      HasTypeSkel Γ (.discrete ps) (.fin ps.1.length)
+  | discrete {Γ : Ctx} {d : DiscreteParam} :
+      HasTypeSkel Γ (.discrete d) (.fin (discreteProbsOf d).1.length)
 
   | diverge {Γ : Ctx} {τ : Ty} :
       HasTypeSkel Γ .diverge τ

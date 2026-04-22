@@ -45,7 +45,8 @@ noncomputable def step : Expr → Dist Expr
   | .var _ =>
       Dist.ret .diverge
 
-  | .discrete ps =>
+  | .discrete d =>
+      let ps := discreteProbsOf d
       let n := ps.1.length
       let discreteMeasure : Dist (Fin n) :=
         Finset.univ.sum (fun i : Fin n => (ps.1.get i) • Dist.ret i)
@@ -150,8 +151,9 @@ lemma step_preserves_type_ae {τ : Ty} {e : Expr}
       exfalso
       simp [Ctx.empty] at hx
   | discrete =>
-      rename_i ps
+      rename_i d
       simp only [Untyped.step]
+      let ps := discreteProbsOf d
       let n := ps.1.length
       let discreteMeasure : Dist (Fin n) :=
         Finset.univ.sum (fun i : Fin n => (ps.1.get i) • Dist.ret i)
@@ -287,11 +289,11 @@ lemma step_untyped_is_subprob_measure (e : Expr) :
   | const _ | finconst _ _ | trueE | falseE | var _ =>
       simp only [Untyped.step]
       exact ret_is_subprob_measure _
-  | discrete ps =>
+  | discrete d =>
       simp only [Untyped.step]
       apply bind_is_subprob_measure
       · unfold IsSubProbabilityMeasure
-        simpa [Dist.ret_is_dirac, ps.2] using (le_rfl : (1 : ENNReal) ≤ 1)
+        simpa [Dist.ret_is_dirac, (discreteProbsOf d).2]
       · intro i; exact ret_is_subprob_measure _
       · simpa [Dist.ret_is_dirac] using
           MeasureTheory.Measure.measurable_dirac.comp (finconst_wrap_measurable _)
@@ -345,25 +347,6 @@ lemma step_untyped_is_subprob_measure (e : Expr) :
           (fun _ => ret_is_subprob_measure _)
           (by simpa [Dist.ret_is_dirac] using
             MeasureTheory.Measure.measurable_dirac.comp (uniform_left_wrap_measurable e2))
-
-lemma step_is_subprob_measure {τ : Ty} (e : ExprsOfType τ) :
-    IsSubProbabilityMeasure (step e) := by
-  classical
-  have hUntyped := step_untyped_is_subprob_measure e.1
-  unfold step IsSubProbabilityMeasure at hUntyped ⊢
-  let f : Expr → ExprsOfType τ :=
-    fun e' => if h : HasType Ctx.empty e' τ then (⟨e', h⟩ : ExprsOfType τ) else e
-  by_cases hf : AEMeasurable
-      f
-      (Untyped.step e.1)
-  · calc
-      (Measure.map f (Untyped.step e.1)) Set.univ
-          = (Untyped.step e.1) Set.univ := by
-            rw [Measure.map_apply_of_aemeasurable hf MeasurableSet.univ, Set.preimage_univ]
-      _ ≤ 1 := hUntyped
-  · rw [Measure.map_of_not_aemeasurable hf]
-    change (0 : ENNReal) ≤ 1
-    exact zero_le (1 : ENNReal)
 
 -- ---------------------------------------------------------------------------
 -- 2. Measurability
@@ -440,7 +423,7 @@ lemma bind_is_measurable
   exact Kernel.measurable _
 
 /-- Filling an if skeleton with a hole assignment v is measurable. -/
-lemma step_if_slice_measurable
+lemma step_if_measurable
     (s1 s2 s3 : Untyped.Skeleton)
     (ih1 : Measurable (fun v : Fin (Untyped.numHoles s1) → ℝ =>
       Untyped.step (Untyped.fillSkeleton s1 v))) :
@@ -529,7 +512,7 @@ lemma step_if_slice_measurable
 
 
 /-- Filling a lt skeleton with a hole assignment v is measurable. -/
-lemma step_lt_slice_measurable
+lemma step_lt_measurable
     (s1 s2 : Untyped.Skeleton)
     (ih1 : Measurable (fun v : Fin (Untyped.numHoles s1) → ℝ =>
       Untyped.step (Untyped.fillSkeleton s1 v)))
@@ -651,7 +634,7 @@ lemma step_lt_slice_measurable
 
 
 /-- Filling a let skeleton with a hole assignment v is measurable. -/
-lemma step_let_slice_measurable
+lemma step_let_measurable
     (x : String) (s1 s2 : Untyped.Skeleton)
     (ih1 : Measurable (fun v : Fin (Untyped.numHoles s1) → ℝ =>
       Untyped.step (Untyped.fillSkeleton s1 v)))
@@ -732,7 +715,7 @@ lemma step_let_slice_measurable
 
 
 /-- Filling a uniform skeleton with a hole assignment v is measurable. -/
-lemma step_uniform_slice_measurable
+lemma step_uniform_measurable
     (s1 s2 : Untyped.Skeleton)
     (ih1 : Measurable (fun v : Fin (Untyped.numHoles s1) → ℝ =>
       Untyped.step (Untyped.fillSkeleton s1 v)))
@@ -882,20 +865,45 @@ lemma step_untyped_measurable :
       simp [Untyped.step, Untyped.fillSkeleton]
   | lt s1 s2 ih1 ih2 =>
       simpa [Untyped.step, Untyped.fillSkeleton] using
-        step_lt_slice_measurable s1 s2 ih1 ih2
+        step_lt_measurable s1 s2 ih1 ih2
   | ifE s1 s2 s3 ih1 _ _ =>
       simpa [Untyped.step, Untyped.fillSkeleton] using
-        step_if_slice_measurable s1 s2 s3 ih1
+        step_if_measurable s1 s2 s3 ih1
   | letE x s1 s2 ih1 ih2 =>
       simpa [Untyped.step, Untyped.fillSkeleton] using
-        step_let_slice_measurable x s1 s2 ih1 ih2
+        step_let_measurable x s1 s2 ih1 ih2
   | uniform s1 s2 ih1 ih2 =>
       simpa [Untyped.step, Untyped.fillSkeleton] using
-        step_uniform_slice_measurable s1 s2 ih1 ih2
+        step_uniform_measurable s1 s2 ih1 ih2
 
 lemma step_untyped_is_subMarkovKernel :
     IsSubMarkovKernel (fun e : Expr => Untyped.step e) := by
   exact ⟨step_untyped_measurable, step_untyped_is_subprob_measure⟩
+
+-- ---------------------------------------------------------------------------
+-- Small-step semantics over well-typed expressions is a Markov kernel.
+-- 1. Subprobability measure
+-- 2. Measurable function
+-- ---------------------------------------------------------------------------
+
+lemma step_is_subprob_measure {τ : Ty} (e : ExprsOfType τ) :
+    IsSubProbabilityMeasure (step e) := by
+  classical
+  have hUntyped := step_untyped_is_subprob_measure e.1
+  unfold step IsSubProbabilityMeasure at hUntyped ⊢
+  let f : Expr → ExprsOfType τ :=
+    fun e' => if h : HasType Ctx.empty e' τ then (⟨e', h⟩ : ExprsOfType τ) else e
+  by_cases hf : AEMeasurable
+      f
+      (Untyped.step e.1)
+  · calc
+      (Measure.map f (Untyped.step e.1)) Set.univ
+          = (Untyped.step e.1) Set.univ := by
+            rw [Measure.map_apply_of_aemeasurable hf MeasurableSet.univ, Set.preimage_univ]
+      _ ≤ 1 := hUntyped
+  · rw [Measure.map_of_not_aemeasurable hf]
+    change (0 : ENNReal) ≤ 1
+    exact zero_le (1 : ENNReal)
 
 lemma measurableSet_hasType_empty (τ : Ty) :
     MeasurableSet ({e : Expr | HasType Ctx.empty e τ} : Set Expr) := by

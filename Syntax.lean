@@ -11,6 +11,12 @@ open MeasureTheory ProbabilityTheory
 -- Probabilities in discrete(...) must sum to 1.
 def DiscreteProbs : Type := {probs : List Prob // probs.sum = 1}
 
+/-- Fixed index set for discrete parameters. -/
+abbrev DiscreteParam : Type := Nat
+
+/-- Table of discrete parameters fixed at setup time. -/
+axiom discreteProbsOf : DiscreteParam → DiscreteProbs
+
 /--
 Slice expressions.
 -/
@@ -20,7 +26,7 @@ inductive Expr where
   | trueE     : Expr
   | falseE    : Expr
   | finconst  : (n : ℕ) → Fin n → Expr
-  | discrete  : DiscreteProbs → Expr
+  | discrete  : DiscreteParam → Expr
   | diverge   : Expr
   | letE      : String → Expr → Expr → Expr
   | lt        : Expr → Expr → Expr
