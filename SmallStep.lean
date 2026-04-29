@@ -683,13 +683,9 @@ lemma step_let_measurable
           x (e2 := e2)
           (by simpa [e2] using ((fillSkeleton_measurable_skel s2).comp hv2)))
   -- Measurability of the value branch: `ret (subst ...)`.
-  have he1 : Measurable e1 := by
-    simpa [e1] using ((fillSkeleton_measurable_skel s1).comp hv1)
-  have he2m : Measurable e2 := by
-    simpa [e2] using ((fillSkeleton_measurable_skel s2).comp hv2)
   have hsubst :
       Measurable (fun v : α => (Dist.ret (subst x (e1 v) (e2 v)) : Dist Expr)) :=
-    subst_dep_ret_measurable x (v := e1) (e2 := e2) he1 he2m
+    subst_dep_ret_measurable x (v := e1) (e2 := e2)
 
   -- Finish by case-splitting on the shape of `s1`; this determines whether `isValue (e1 v)` is always true or false.
   cases s1 with
