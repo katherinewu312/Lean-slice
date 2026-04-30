@@ -31,3 +31,6 @@ name = "SmallStep"
 
 [[lean_lib]]
 name = "TypeSystem"
+
+[[lean_lib]]
+name = "Determinize"
