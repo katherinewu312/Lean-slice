@@ -1,5 +1,4 @@
 import Determinize.Syntax
-import Determinize.TypeSystem
 import Determinize.Monad
 
 namespace Determinize
