@@ -106,7 +106,7 @@ def WellTyped (e : Expr) : Prop :=
   ∃ τ, HasType Ctx.empty e τ
 
 /-- Well-typed expressions of type τ in the empty context. -/
-def ExprsOfType (τ : Ty) : Type :=
+def TExpr (τ : Ty) : Type :=
   {e : Expr // HasType Ctx.empty e τ}
 
 lemma hasType_weaken {Γ Γ' : Ctx} {e : Expr} {τ : Ty}

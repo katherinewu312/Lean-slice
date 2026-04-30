@@ -9,7 +9,7 @@ open MeasureTheory ProbabilityTheory
 /-- TODO: Fill in measurable space later -/
 instance : MeasurableSpace Expr := ⊤
 
-instance (τ : Ty) : MeasurableSpace (ExprsOfType τ) := ⊤
+instance (τ : Ty) : MeasurableSpace (TExpr τ) := ⊤
 
 /-- Syntactic values in the current fragment. -/
 def isValue : Expr → Bool
@@ -116,18 +116,18 @@ noncomputable def step : Expr → Dist Expr
 end Untyped
 
 /-- Typed small-step semantics. -/
-noncomputable def step {τ : Ty} (e : ExprsOfType τ) : Dist (ExprsOfType τ) := by
+noncomputable def step {τ : Ty} (e : TExpr τ) : Dist (TExpr τ) := by
   classical
   exact
     (Untyped.step e.1).map (fun e' =>
       if h : HasType Ctx.empty e' τ then
-        (⟨e', h⟩ : ExprsOfType τ)
+        (⟨e', h⟩ : TExpr τ)
       else
         e)
 
 /-- Well-definedness for typed inputs: stepping a typed term yields a distribution on typed terms. -/
-lemma step_well_defined {τ : Ty} (e : ExprsOfType τ) :
-    ∃ μ : Dist (ExprsOfType τ), μ = step e := by
+lemma step_well_defined {τ : Ty} (e : TExpr τ) :
+    ∃ μ : Dist (TExpr τ), μ = step e := by
   exact ⟨step e, rfl⟩
 
 end Determinize

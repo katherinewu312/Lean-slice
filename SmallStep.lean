@@ -97,12 +97,12 @@ noncomputable def step : Expr → Dist Expr
 end Untyped
 
 -- Small-step semantics over well-typed expressions.
-noncomputable def step {τ : Ty} (e : ExprsOfType τ) : Dist (ExprsOfType τ) := by
+noncomputable def step {τ : Ty} (e : TExpr τ) : Dist (TExpr τ) := by
   classical
   exact
     (Untyped.step e.1).map (fun e' =>
       if h : HasType Ctx.empty e' τ then
-        (⟨e', h⟩ : ExprsOfType τ)
+        (⟨e', h⟩ : TExpr τ)
       else
         -- dummy branch, because .map must take a total function (Expr). This is where type preservation comes in.
         e)
@@ -886,13 +886,13 @@ lemma step_untyped_is_subMarkovKernel :
 -- 2. Measurable function
 -- ---------------------------------------------------------------------------
 
-lemma step_is_subprob_measure {τ : Ty} (e : ExprsOfType τ) :
+lemma step_is_subprob_measure {τ : Ty} (e : TExpr τ) :
     IsSubProbabilityMeasure (step e) := by
   classical
   have hUntyped := step_untyped_is_subprob_measure e.1
   unfold step IsSubProbabilityMeasure at hUntyped ⊢
-  let f : Expr → ExprsOfType τ :=
-    fun e' => if h : HasType Ctx.empty e' τ then (⟨e', h⟩ : ExprsOfType τ) else e
+  let f : Expr → TExpr τ :=
+    fun e' => if h : HasType Ctx.empty e' τ then (⟨e', h⟩ : TExpr τ) else e
   by_cases hf : AEMeasurable
       f
       (Untyped.step e.1)
@@ -947,15 +947,15 @@ lemma measurableSet_hasType_empty (τ : Ty) :
       (measurable_const : Measurable (fun _ : Untyped.ExprsOfSkel σ => False))
 
 lemma step_measurable {τ : Ty} :
-    Measurable (fun e : ExprsOfType τ => step e) := by
+    Measurable (fun e : TExpr τ => step e) := by
   classical
-  let d : ExprsOfType τ := ⟨Expr.diverge, HasType.diverge (Γ := Ctx.empty) (τ := τ)⟩
-  let lift : Expr → ExprsOfType τ :=
+  let d : TExpr τ := ⟨Expr.diverge, HasType.diverge (Γ := Ctx.empty) (τ := τ)⟩
+  let lift : Expr → TExpr τ :=
     fun e' => if h : HasType Ctx.empty e' τ then ⟨e', h⟩ else d
 
   have hcoe_eq :
       (fun e' : Expr => (lift e').1) =
-      (fun e' : Expr => if h : HasType Ctx.empty e' τ then e' else (d : ExprsOfType τ).1) := by
+      (fun e' : Expr => if h : HasType Ctx.empty e' τ then e' else (d : TExpr τ).1) := by
     funext e'
     by_cases h : HasType Ctx.empty e' τ
     · simp [lift, h]
@@ -965,25 +965,25 @@ lemma step_measurable {τ : Ty} :
     exact Measurable.ite (p := fun e' : Expr => HasType Ctx.empty e' τ)
       (measurableSet_hasType_empty τ)
       measurable_id
-      (measurable_const : Measurable (fun _ : Expr => (d : ExprsOfType τ).1))
+      (measurable_const : Measurable (fun _ : Expr => (d : TExpr τ).1))
   have hlift : Measurable lift := by
     exact (measurable_comap_iff).2 (by simpa [Function.comp, lift] using hlift_coe)
 
-  have hμ : Measurable (fun e : ExprsOfType τ => Untyped.step e.1) :=
+  have hμ : Measurable (fun e : TExpr τ => Untyped.step e.1) :=
     step_untyped_measurable.comp measurable_subtype_coe
   have hmap :
-      Measurable (fun e : ExprsOfType τ => MeasureTheory.Measure.map lift (Untyped.step e.1)) :=
+      Measurable (fun e : TExpr τ => MeasureTheory.Measure.map lift (Untyped.step e.1)) :=
     (MeasureTheory.Measure.measurable_map lift hlift).comp hμ
 
   have hstep_eq :
-      (fun e : ExprsOfType τ => step e) =
-      (fun e : ExprsOfType τ => MeasureTheory.Measure.map lift (Untyped.step e.1)) := by
+      (fun e : TExpr τ => step e) =
+      (fun e : TExpr τ => MeasureTheory.Measure.map lift (Untyped.step e.1)) := by
     funext e
     have htyped_ae : ∀ᵐ e' ∂ Untyped.step e.1, HasType Ctx.empty e' τ := by
       exact (MeasureTheory.ae_iff).2
         (step_preserves_type_ae (τ := τ) e.2 (fun τ' => measurableSet_hasType_empty τ'))
     have hmap_congr :
-        (fun e' : Expr => if h : HasType Ctx.empty e' τ then (⟨e', h⟩ : ExprsOfType τ) else e)
+        (fun e' : Expr => if h : HasType Ctx.empty e' τ then (⟨e', h⟩ : TExpr τ) else e)
           =ᵐ[Untyped.step e.1] lift := by
       refine htyped_ae.mono ?_
       intro e' he'
@@ -994,7 +994,7 @@ lemma step_measurable {τ : Ty} :
   simpa [hstep_eq] using hmap
 
 lemma step_is_subMarkovKernel {τ : Ty} :
-    IsSubMarkovKernel (fun e : ExprsOfType τ => step e) := by
+    IsSubMarkovKernel (fun e : TExpr τ => step e) := by
   refine ⟨step_measurable, step_is_subprob_measure⟩
 
 end Slice

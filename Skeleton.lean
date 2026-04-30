@@ -491,7 +491,7 @@ lemma fillSkeleton_preserves_type {Γ : Ctx} {s : Untyped.Skeleton} {τ : Ty}
 
 -- Fills a well-typed skeleton s with hole assignment v, reading holes left-to-right, producing a well-typed expression
 def fillSkeleton {τ : Ty} (s : SkeletonsOfType τ) :
-    (Fin (numHoles s) → ℝ) → ExprsOfType τ
+    (Fin (numHoles s) → ℝ) → TExpr τ
   | v => ⟨Untyped.fillSkeleton s.1 v, fillSkeleton_preserves_type s.2 v⟩
 
 -- Replacing every real constant in a well-typed expression by a hole produces a well-typed skeleton (of the same type).
@@ -524,18 +524,18 @@ lemma hasTypeSkel_of_hasType {Γ : Ctx} {e : Expr} {τ : Ty}
 
 
 -- Extract the well-typed skeleton of a well-typed expression.
-def skeletonOf {τ : Ty} (e : ExprsOfType τ) : SkeletonsOfType τ :=
+def skeletonOf {τ : Ty} (e : TExpr τ) : SkeletonsOfType τ :=
   ⟨Untyped.skeletonOf e.1, hasTypeSkel_of_hasType e.2⟩
 
 -- The vector of real constants appearing in a well-typed expression, from left-to-right. This is the second component of dec₂.
-def holeValues {τ : Ty} (e : ExprsOfType τ) : Fin (numHoles (skeletonOf e)) → ℝ := by
+def holeValues {τ : Ty} (e : TExpr τ) : Fin (numHoles (skeletonOf e)) → ℝ := by
   simpa [numHoles, skeletonOf] using (Untyped.holeValues e.1)
 
 -- The set of well-typed expressions whose skeleton is exactly s:τ.
 def ExprsOfSkel {τ : Ty} (s : SkeletonsOfType τ) : Type :=
-  {e : ExprsOfType τ // skeletonOf e = s}
+  {e : TExpr τ // skeletonOf e = s}
 
-theorem fillSkeleton_holeValues {τ : Ty} (e : ExprsOfType τ) :
+theorem fillSkeleton_holeValues {τ : Ty} (e : TExpr τ) :
   fillSkeleton (skeletonOf e) (holeValues e) = e := by
   apply Subtype.ext
   simpa [fillSkeleton, skeletonOf, holeValues, numHoles] using
@@ -591,8 +591,8 @@ noncomputable instance exprsOfSkel_measurableSpace {τ : Ty} (σ : SkeletonsOfTy
   MeasurableSpace.comap (exprsOfSkel_equiv σ) inferInstance
 
 /-- Well-typed expressions of type τ is measurable. -/
-noncomputable instance exprsOfType_measurableSpace (τ : Ty) :
-    MeasurableSpace (ExprsOfType τ) :=
+noncomputable instance TExpr_measurableSpace (τ : Ty) :
+    MeasurableSpace (TExpr τ) :=
   MeasurableSpace.comap (fun ⟨e, _⟩ => e) Untyped.expr_measurableSpace
 
 end Slice
