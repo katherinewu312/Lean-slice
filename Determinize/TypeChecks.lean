@@ -2,142 +2,134 @@ import Determinize.TypeSystem
 
 namespace Determinize
 
-/-- Some examples of well-typed expressions. -/
+/-- Some examples of typed expressions. -/
 
 -- const can be typed at either mode
-example : HasType Ctx.empty (.const (1 : ℝ)) (.float .E) :=
-  HasType.const
+example : TExpr (.float .E) :=
+  .const (1 : ℝ)
 
-example : HasType Ctx.empty (.const (1 : ℝ)) (.float .G) :=
-  HasType.const
+example : TExpr (.float .G) :=
+  .const (1 : ℝ)
 
 -- comparison requires both operands ≼ G
-example : HasType Ctx.empty (.lt (.const (1 : ℝ)) (.const (2 : ℝ))) .bool := by
-  exact HasType.lt
-    (HasType.const (m := .G))
-    (HasType.const (m := .G))
+example : TExpr .bool :=
+  .lt
+    (.const (m := .G) (1 : ℝ))
+    (.const (m := .G) (2 : ℝ))
     (ModeLE.refl .G)
     (ModeLE.refl .G)
 
 -- addition is mode-parametric
-example : HasType Ctx.empty (.add (.const (1 : ℝ)) (.const (2 : ℝ))) (.float .E) := by
-  exact HasType.add
-    (HasType.const (m := .G))
-    (HasType.const (m := .G))
+example : TExpr (.float .E) :=
+  .add
+    (.const (m := .G) (1 : ℝ))
+    (.const (m := .G) (2 : ℝ))
     ModeLE.g_le_e
     ModeLE.g_le_e
 
-example : HasType Ctx.empty (.add (.const (1 : ℝ)) (.const (2 : ℝ))) (.float .G) := by
-  exact HasType.add
-    (HasType.const (m := .G))
-    (HasType.const (m := .G))
+example : TExpr (.float .G) :=
+  .add
+    (.const (m := .G) (1 : ℝ))
+    (.const (m := .G) (2 : ℝ))
     (ModeLE.refl .G)
     (ModeLE.refl .G)
 
-example : HasType Ctx.empty (.add (.const (1 : ℝ)) (.const (2 : ℝ))) (.float .E) := by
-  exact HasType.add
-    (HasType.const (m := .G))
-    (HasType.const (m := .E))
+example : TExpr (.float .E) :=
+  .add
+    (.const (m := .G) (1 : ℝ))
+    (.const (m := .E) (2 : ℝ))
     ModeLE.g_le_e
     (ModeLE.refl .E)
 
 -- general multiplication
-example : HasType Ctx.empty (.mul (.const (2 : ℝ)) (.const (3 : ℝ))) (.float .E) := by
-  exact HasType.mul_g
-    (HasType.const (m := .G))
-    (HasType.const (m := .G))
+example : TExpr (.float .E) :=
+  .mulG
+    (.const (m := .G) (2 : ℝ))
+    (.const (m := .G) (3 : ℝ))
     (ModeLE.refl .G)
     (ModeLE.refl .G)
 
 -- literal-specialized multiplication into E
-example : HasType Ctx.empty (.mul (.const (2 : ℝ)) (.const (3 : ℝ))) (.float .E) := by
-  exact HasType.mul_const_l
-    (HasType.const (m := .E))
-    (HasType.const (m := .G))
+example : TExpr (.float .E) :=
+  .mulConstL
+    (m1 := .E)
+    (m2 := .G)
+    (2 : ℝ)
+    (.const (m := .G) (3 : ℝ))
     (ModeLE.refl .E)
     ModeLE.g_le_e
 
 -- if
-example : HasType Ctx.empty (.ifE .trueE (.const (0 : ℝ)) (.const (1 : ℝ))) (.float .E) := by
-  exact HasType.ifE
-    HasType.trueE
-    (HasType.const (m := .E))
-    (HasType.const (m := .E))
+example : TExpr (.float .E) :=
+  .ifE
+    .trueE
+    (.const (m := .E) (0 : ℝ))
+    (.const (m := .E) (1 : ℝ))
 
 -- let
-example :
-    HasType Ctx.empty
-      (.letE "x" (.const (1 : ℝ)) (.add (.var "x") (.const (2 : ℝ))))
-      (.float .E) := by
-  refine HasType.letE (τ1 := .float .E) ?h1 ?h2
-  · exact HasType.const (m := .E)
-  · have hx : (Ctx.extend Ctx.empty "x" (.float .E)) "x" = some (.float .E) := by
-      simp [Ctx.extend]
-    exact HasType.add
-      (HasType.var hx)
-      (HasType.const (m := .G))
+example : TExpr (.float .E) :=
+  .letE
+    "x"
+    (.const (m := .E) (1 : ℝ))
+    (.add
+      (.var "x")
+      (.const (m := .G) (2 : ℝ))
       (ModeLE.refl .E)
-      ModeLE.g_le_e
+      ModeLE.g_le_e)
 
 -- uniform
-example : HasType Ctx.empty (.uniform (.const (0 : ℝ)) (.const (1 : ℝ))) (.float .E) := by
-  exact HasType.uniform
-    (HasType.const (m := .G))
-    (HasType.const (m := .G))
+example : TExpr (.float .E) :=
+  .uniform
+    (.const (m := .G) (0 : ℝ))
+    (.const (m := .G) (1 : ℝ))
     ModeLE.g_le_e
     ModeLE.g_le_e
 
-example : HasType Ctx.empty (.uniform (.const (0 : ℝ)) (.const (1 : ℝ))) (.float .E) := by
-  exact HasType.uniform
-    (HasType.const (m := .E))
-    (HasType.const (m := .G))
+example : TExpr (.float .E) :=
+  .uniform
+    (.const (m := .E) (0 : ℝ))
+    (.const (m := .G) (1 : ℝ))
     (ModeLE.refl .E)
     ModeLE.g_le_e
 
 -- gaussian: second param must be ≼ G
-example : HasType Ctx.empty (.gaussian (.const (0 : ℝ)) (.const (1 : ℝ))) (.float .E) := by
-  exact HasType.gaussian
-    (HasType.const (m := .E))
-    (HasType.const (m := .G))
+example : TExpr (.float .E) :=
+  .gaussian
+    (.const (m := .E) (0 : ℝ))
+    (.const (m := .G) (1 : ℝ))
     (ModeLE.refl .E)
     (ModeLE.refl .G)
 
 -- poisson
-example : HasType Ctx.empty (.poisson (.const (2 : ℝ))) (.float .E) := by
-  exact HasType.poisson
-    (HasType.const (m := .G))
+example : TExpr (.float .E) :=
+  .poisson
+    (.const (m := .G) (2 : ℝ))
     ModeLE.g_le_e
 
 -- exponential: input mode must be ≼ G
-example : HasType Ctx.empty (.exponential (.const (2 : ℝ))) (.float .E) := by
-  exact HasType.exponential
-    (HasType.const (m := .G))
+example : TExpr (.float .E) :=
+  .exponential
+    (.const (m := .G) (2 : ℝ))
     (ModeLE.refl .G)
 
 -- beta: both params must be ≼ G
-example : HasType Ctx.empty (.beta (.const (1 : ℝ)) (.const (2 : ℝ))) (.float .E) := by
-  exact HasType.beta
-    (HasType.const (m := .G))
-    (HasType.const (m := .G))
+example : TExpr (.float .E) :=
+  .beta
+    (.const (m := .G) (1 : ℝ))
+    (.const (m := .G) (2 : ℝ))
     (ModeLE.refl .G)
     (ModeLE.refl .G)
 
 -- gamma: second param ≼ G
-example : HasType Ctx.empty (.gamma (.const (1 : ℝ)) (.const (2 : ℝ))) (.float .E) := by
-  exact HasType.gamma
-    (HasType.const (m := .G))
-    (HasType.const (m := .G))
+example : TExpr (.float .E) :=
+  .gamma
+    (.const (m := .G) (1 : ℝ))
+    (.const (m := .G) (2 : ℝ))
     ModeLE.g_le_e
     (ModeLE.refl .G)
 
 -- float subtyping at the type level
 example : (.float .G) <: (.float .E) :=
   TySub.float ModeLE.g_le_e
-
--- subsumption
-example : HasType Ctx.empty (.const (5 : ℝ)) (.float .E) := by
-  exact HasType.subsume
-    (HasType.const (m := .G))
-    (TySub.float ModeLE.g_le_e)
 
 end Determinize

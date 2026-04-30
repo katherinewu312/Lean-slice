@@ -31,14 +31,6 @@ noncomputable def bind {α β : Type} [MeasurableSpace α] [MeasurableSpace β]
     (μ : Dist α) (k : α → Dist β) :
     Dist.bind μ k = Measure.bind μ k := rfl
 
-/-- Primitive continuous samplers (kept abstract at this stage). -/
-axiom uniform : ℝ → ℝ → Dist ℝ
-axiom gaussian : ℝ → ℝ → Dist ℝ
-axiom poisson : ℝ → Dist ℝ
-axiom exponential : ℝ → Dist ℝ
-axiom beta : ℝ → ℝ → Dist ℝ
-axiom gamma : ℝ → ℝ → Dist ℝ
-
 end Dist
 
 end Determinize
