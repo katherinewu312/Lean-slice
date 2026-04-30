@@ -106,4 +106,10 @@ example : HasType Ctx.empty (.gaussian (.const (0 : ℝ)) (.const (1 : ℝ))) (.
 example : (.float .G) <: (.float .E) :=
   TySub.float ModeLE.g_le_e
 
+-- subsumption
+example : HasType Ctx.empty (.const (5 : ℝ)) (.float .E) := by
+  exact HasType.subsume
+    (HasType.const (m := .G))
+    (TySub.float ModeLE.g_le_e)
+
 end Determinize

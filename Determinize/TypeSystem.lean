@@ -117,6 +117,11 @@ inductive HasType : Ctx → Expr → Ty → Prop where
       m2 ≼ .G →
       HasType Γ (.gaussian e1 e2) (.float m)
 
+  | subsume {Γ : Ctx} {e : Expr} {τ1 τ2 : Ty} :
+      HasType Γ e τ1 →
+      τ1 <: τ2 →
+      HasType Γ e τ2
+
 /-- Closed well-typed terms. -/
 def WellTyped (e : Expr) : Prop :=
   ∃ τ, HasType Ctx.empty e τ
