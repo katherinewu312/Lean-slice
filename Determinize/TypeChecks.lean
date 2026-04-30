@@ -94,12 +94,40 @@ example : HasType Ctx.empty (.uniform (.const (0 : ℝ)) (.const (1 : ℝ))) (.f
     (ModeLE.refl .E)
     ModeLE.g_le_e
 
--- gaussian: second arg must be ≼ G
+-- gaussian: second param must be ≼ G
 example : HasType Ctx.empty (.gaussian (.const (0 : ℝ)) (.const (1 : ℝ))) (.float .E) := by
   exact HasType.gaussian
     (HasType.const (m := .E))
     (HasType.const (m := .G))
     (ModeLE.refl .E)
+    (ModeLE.refl .G)
+
+-- poisson
+example : HasType Ctx.empty (.poisson (.const (2 : ℝ))) (.float .E) := by
+  exact HasType.poisson
+    (HasType.const (m := .G))
+    ModeLE.g_le_e
+
+-- exponential: input mode must be ≼ G
+example : HasType Ctx.empty (.exponential (.const (2 : ℝ))) (.float .E) := by
+  exact HasType.exponential
+    (HasType.const (m := .G))
+    (ModeLE.refl .G)
+
+-- beta: both params must be ≼ G
+example : HasType Ctx.empty (.beta (.const (1 : ℝ)) (.const (2 : ℝ))) (.float .E) := by
+  exact HasType.beta
+    (HasType.const (m := .G))
+    (HasType.const (m := .G))
+    (ModeLE.refl .G)
+    (ModeLE.refl .G)
+
+-- gamma: second param ≼ G
+example : HasType Ctx.empty (.gamma (.const (1 : ℝ)) (.const (2 : ℝ))) (.float .E) := by
+  exact HasType.gamma
+    (HasType.const (m := .G))
+    (HasType.const (m := .G))
+    ModeLE.g_le_e
     (ModeLE.refl .G)
 
 -- float subtyping at the type level

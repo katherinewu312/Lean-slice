@@ -16,7 +16,8 @@ inductive Ty where
 deriving DecidableEq, Repr
 
 /-- Expressions for now:
-`var`, float literals, booleans, `let`, comparison, arithmetic, `if`, uniform, gaussian. -/
+`var`, float literals, booleans, `let`, comparison, arithmetic, `if`,
+uniform, gaussian, poisson, exponential, beta, gamma. -/
 inductive Expr where
   | var : String → Expr
   | const : ℝ → Expr
@@ -29,6 +30,10 @@ inductive Expr where
   | ifE : Expr → Expr → Expr → Expr
   | uniform : Expr → Expr → Expr
   | gaussian : Expr → Expr → Expr
+  | poisson : Expr → Expr
+  | exponential : Expr → Expr
+  | beta : Expr → Expr → Expr
+  | gamma : Expr → Expr → Expr
 
 /-- Substitution for the current fragment -/
 def subst (x : String) (v : Expr) : Expr → Expr
@@ -57,5 +62,13 @@ def subst (x : String) (v : Expr) : Expr → Expr
       .uniform (subst x v e1) (subst x v e2)
   | .gaussian e1 e2 =>
       .gaussian (subst x v e1) (subst x v e2)
+  | .poisson e =>
+      .poisson (subst x v e)
+  | .exponential e =>
+      .exponential (subst x v e)
+  | .beta e1 e2 =>
+      .beta (subst x v e1) (subst x v e2)
+  | .gamma e1 e2 =>
+      .gamma (subst x v e1) (subst x v e2)
 
 end Determinize

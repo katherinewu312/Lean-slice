@@ -117,6 +117,30 @@ inductive HasType : Ctx → Expr → Ty → Prop where
       m2 ≼ .G →
       HasType Γ (.gaussian e1 e2) (.float m)
 
+  | poisson {Γ : Ctx} {e1 : Expr} {m1 m : Mode} :
+      HasType Γ e1 (.float m1) →
+      m1 ≼ m →
+      HasType Γ (.poisson e1) (.float m)
+
+  | exponential {Γ : Ctx} {e1 : Expr} {m1 m : Mode} :
+      HasType Γ e1 (.float m1) →
+      m1 ≼ .G →
+      HasType Γ (.exponential e1) (.float m)
+
+  | beta {Γ : Ctx} {e1 e2 : Expr} {m1 m2 m : Mode} :
+      HasType Γ e1 (.float m1) →
+      HasType Γ e2 (.float m2) →
+      m1 ≼ .G →
+      m2 ≼ .G →
+      HasType Γ (.beta e1 e2) (.float m)
+
+  | gamma {Γ : Ctx} {e1 e2 : Expr} {m1 m2 m : Mode} :
+      HasType Γ e1 (.float m1) →
+      HasType Γ e2 (.float m2) →
+      m1 ≼ m →
+      m2 ≼ .G →
+      HasType Γ (.gamma e1 e2) (.float m)
+
   | subsume {Γ : Ctx} {e : Expr} {τ1 τ2 : Ty} :
       HasType Γ e τ1 →
       τ1 <: τ2 →
