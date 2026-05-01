@@ -10,6 +10,22 @@ instance (τ : Ty) : MeasurableSpace (TExpr τ) := ⊤
 
 namespace TExpr
 
+def subsumedValue? {τ1 τ2 : Ty} (e : TExpr τ1) (h : τ1 <: τ2) : Option (TExpr τ2) :=
+  match h with
+  | .unit =>
+      match unitValue? e with
+      | some _ => some .unitE
+      | none => none
+  | .bool =>
+      match boolValue? e with
+      | some true => some .trueE
+      | some false => some .falseE
+      | none => none
+  | .float (m2 := m2) _ =>
+      match floatValue? e with
+      | some v => some (.const (m := m2) v)
+      | none => none
+
 /-- Small-step semantics over typed expressions. -/
 noncomputable def step : {τ : Ty} → TExpr τ → Dist (TExpr τ)
   | _, .var x =>
@@ -126,40 +142,10 @@ noncomputable def step : {τ : Ty} → TExpr τ → Dist (TExpr τ)
           Dist.bind (step e2) (fun g => Dist.ret (.gamma (.const v1) g h1 h2))
       | none, _ =>
           Dist.bind (step e1) (fun g => Dist.ret (.gamma g e2 h1 h2))
-  | τ2, .subsume (τ1 := τ1) e h =>
-      match τ1, τ2 with
-      | .unit, .unit =>
-          match unitValue? e with
-          | some _ =>
-              Dist.ret .unitE
-          | none =>
-              Dist.bind (step e) (fun g => Dist.ret (.subsume g h))
-      | .bool, .bool =>
-          match boolValue? e with
-          | some true =>
-              Dist.ret .trueE
-          | some false =>
-              Dist.ret .falseE
-          | none =>
-              Dist.bind (step e) (fun g => Dist.ret (.subsume g h))
-      | .float _, .float m =>
-          match floatValue? e with
-          | some v =>
-              Dist.ret (.const (m := m) v)
-          | none =>
-              Dist.bind (step e) (fun g => Dist.ret (.subsume g h))
-      | .unit, .bool =>
-          nomatch h
-      | .unit, .float _ =>
-          nomatch h
-      | .bool, .unit =>
-          nomatch h
-      | .bool, .float _ =>
-          nomatch h
-      | .float _, .unit =>
-          nomatch h
-      | .float _, .bool =>
-          nomatch h
+  | _, .subsume e h =>
+      match subsumedValue? e h with
+      | some v => Dist.ret v
+      | none => Dist.bind (step e) (fun g => Dist.ret (.subsume g h))
 
 /-- Relational presentation of the same typed step semantics. -/
 inductive Step {τ : Ty} : TExpr τ → Dist (TExpr τ) → Prop where

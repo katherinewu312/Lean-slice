@@ -19,7 +19,7 @@ def subsumeFloat {m1 m2 : Mode} (h : m1 ≼ m2) (e : TExpr (.float m1)) :
   | .G, .G =>
       e
   | .G, .E =>
-      .subsume e (TySub.float h)
+      .subsume e (Sub.float h)
   | .E, .G =>
       False.elim (not_e_le_g h)
 
@@ -112,6 +112,17 @@ example (c : ℝ) :
 
 example :
     det
+      (.poisson
+        (m := .E)
+        (.const (m := .G) (8 : ℝ))
+        ModeLE.g_le_e) =
+      .subsume
+        (.const (m := .G) (8 : ℝ))
+        (Sub.float ModeLE.g_le_e) :=
+  rfl
+
+example :
+    det
       (.gaussian
         (m := .E)
         (.const (m := .G) (0 : ℝ))
@@ -120,7 +131,7 @@ example :
         (ModeLE.refl .G)) =
       .subsume
         (.const (m := .G) (0 : ℝ))
-        (TySub.float ModeLE.g_le_e) :=
+        (Sub.float ModeLE.g_le_e) :=
   rfl
 
 example :

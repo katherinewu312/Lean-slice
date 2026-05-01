@@ -31,14 +31,15 @@ lemma modeLe_trans {m1 m2 m3 : Mode} (h12 : m1 ≼ m2) (h23 : m2 ≼ m3) : m1 �
       | refl =>
           exact ModeLE.g_le_e
 
-/-- Type subtyping for modes and standard type structure. -/
-inductive TySub : Ty → Ty → Prop where
-  | refl {τ : Ty} : TySub τ τ
+/-- Subtypes. -/
+inductive Sub : Ty → Ty → Type where
+  | unit : Sub .unit .unit
+  | bool : Sub .bool .bool
   | float {m1 m2 : Mode} :
       m1 ≼ m2 →
-      TySub (.float m1) (.float m2)
+      Sub (.float m1) (.float m2)
 
-infix:50 " <: " => TySub
+infix:50 " <: " => Sub
 
 /-- Typed expressions. -/
 inductive TExpr : Ty → Type where

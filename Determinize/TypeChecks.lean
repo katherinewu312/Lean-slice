@@ -130,6 +130,6 @@ example : TExpr (.float .E) :=
 
 -- float subtyping at the type level
 example : (.float .G) <: (.float .E) :=
-  TySub.float ModeLE.g_le_e
+  Sub.float ModeLE.g_le_e
 
 end Determinize
