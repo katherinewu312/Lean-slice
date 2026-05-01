@@ -63,6 +63,9 @@ inductive TExpr : Ty → Type where
   | mulConstR {m1 m2 m : Mode}
       (e : TExpr (.float m1)) (c : ℝ) :
       m1 ≼ m → m2 ≼ m → TExpr (.float m)
+  | div {m1 m2 m : Mode}
+      (e1 : TExpr (.float m1)) (e2 : TExpr (.float m2)) :
+      m1 ≼ m → m2 ≼ .G → TExpr (.float m)
   | ifE {τ : Ty} (c : TExpr .bool) (t f : TExpr τ) : TExpr τ
   | uniform {m1 m2 m : Mode}
       (e1 : TExpr (.float m1)) (e2 : TExpr (.float m2)) :
@@ -82,6 +85,8 @@ inductive TExpr : Ty → Type where
   | gamma {m1 m2 m : Mode}
       (e1 : TExpr (.float m1)) (e2 : TExpr (.float m2)) :
       m1 ≼ m → m2 ≼ .G → TExpr (.float m)
+  | subsume {τ1 τ2 : Ty} (e : TExpr τ1) :
+      τ1 <: τ2 → TExpr τ2
 
 namespace TExpr
 
@@ -118,6 +123,8 @@ def subst {σ τ : Ty} (x : String) (v : TExpr σ) : TExpr τ → TExpr τ
       .mulConstL c (subst x v e) h1 h2
   | .mulConstR e c h1 h2 =>
       .mulConstR (subst x v e) c h1 h2
+  | .div e1 e2 h1 h2 =>
+      .div (subst x v e1) (subst x v e2) h1 h2
   | .ifE c t f =>
       .ifE (subst x v c) (subst x v t) (subst x v f)
   | .uniform e1 e2 h1 h2 =>
@@ -132,6 +139,8 @@ def subst {σ τ : Ty} (x : String) (v : TExpr σ) : TExpr τ → TExpr τ
       .beta (subst x v e1) (subst x v e2) h1 h2
   | .gamma e1 e2 h1 h2 =>
       .gamma (subst x v e1) (subst x v e2) h1 h2
+  | .subsume e h =>
+      .subsume (subst x v e) h
 
 /-- Numeric values. -/
 def floatValue? : {m : Mode} → TExpr (.float m) → Option ℝ

@@ -71,6 +71,14 @@ noncomputable def step : {τ : Ty} → TExpr τ → Dist (TExpr τ)
           Dist.ret (.const (m := m) (v * c))
       | none =>
           Dist.bind (step e) (fun g => Dist.ret (.mulConstR g c h1 h2))
+  | .float m, .div e1 e2 h1 h2 =>
+      match floatValue? e1, floatValue? e2 with
+      | some v1, some v2 =>
+          Dist.ret (.const (m := m) (v1 / v2))
+      | some v1, none =>
+          Dist.bind (step e2) (fun g => Dist.ret (.div (.const v1) g h1 h2))
+      | none, _ =>
+          Dist.bind (step e1) (fun g => Dist.ret (.div g e2 h1 h2))
   | .float m, .uniform e1 e2 h1 h2 =>
       match floatValue? e1, floatValue? e2 with
       | some v1, some v2 =>
@@ -118,6 +126,40 @@ noncomputable def step : {τ : Ty} → TExpr τ → Dist (TExpr τ)
           Dist.bind (step e2) (fun g => Dist.ret (.gamma (.const v1) g h1 h2))
       | none, _ =>
           Dist.bind (step e1) (fun g => Dist.ret (.gamma g e2 h1 h2))
+  | τ2, .subsume (τ1 := τ1) e h =>
+      match τ1, τ2 with
+      | .unit, .unit =>
+          match unitValue? e with
+          | some _ =>
+              Dist.ret .unitE
+          | none =>
+              Dist.bind (step e) (fun g => Dist.ret (.subsume g h))
+      | .bool, .bool =>
+          match boolValue? e with
+          | some true =>
+              Dist.ret .trueE
+          | some false =>
+              Dist.ret .falseE
+          | none =>
+              Dist.bind (step e) (fun g => Dist.ret (.subsume g h))
+      | .float _, .float m =>
+          match floatValue? e with
+          | some v =>
+              Dist.ret (.const (m := m) v)
+          | none =>
+              Dist.bind (step e) (fun g => Dist.ret (.subsume g h))
+      | .unit, .bool =>
+          nomatch h
+      | .unit, .float _ =>
+          nomatch h
+      | .bool, .unit =>
+          nomatch h
+      | .bool, .float _ =>
+          nomatch h
+      | .float _, .unit =>
+          nomatch h
+      | .float _, .bool =>
+          nomatch h
 
 /-- Relational presentation of the same typed step semantics. -/
 inductive Step {τ : Ty} : TExpr τ → Dist (TExpr τ) → Prop where

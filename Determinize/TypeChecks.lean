@@ -1,4 +1,4 @@
-import Determinize.TypeSystem
+import Determinize.Syntax
 
 namespace Determinize
 
