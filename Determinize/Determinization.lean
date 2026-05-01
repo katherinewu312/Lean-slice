@@ -24,7 +24,7 @@ def subsumeFloat {m1 m2 : Mode} (h : m1 ≼ m2) (e : TExpr (.float m1)) :
       False.elim (not_e_le_g h)
 
 /-- Determinization function. -/
-noncomputable def det : {τ : Ty} → TExpr τ → TExpr τ
+def det : {τ : Ty} → TExpr τ → TExpr τ
   | _, .var x =>
       .var x
   | _, .unitE =>
