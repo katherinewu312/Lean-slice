@@ -147,6 +147,93 @@ noncomputable def step : {τ : Ty} → TExpr τ → Dist (TExpr τ)
       | some v => Dist.ret v
       | none => Dist.bind (step e) (fun g => Dist.ret (.subsume g h))
 
+/-- Examples. -/
+example :
+    let g0 : TExpr (.float .G) :=
+      .gaussian
+        (m := .G)
+        (.const (m := .G) (0 : ℝ))
+        (.const (m := .G) (1 : ℝ))
+        (ModeLE.refl .G)
+        (ModeLE.refl .G)
+    let g1 : TExpr (.float .G) :=
+      .gaussian
+        (m := .G)
+        (.const (m := .G) (1 : ℝ))
+        (.const (m := .G) (1 : ℝ))
+        (ModeLE.refl .G)
+        (ModeLE.refl .G)
+    let g2 : TExpr (.float .G) :=
+      .gaussian
+        (m := .G)
+        (.const (m := .G) (2 : ℝ))
+        (.const (m := .G) (1 : ℝ))
+        (ModeLE.refl .G)
+        (ModeLE.refl .G)
+    step
+      (.add
+        (m := .G)
+        (.add
+          (m := .G)
+          g0
+          g1
+          (ModeLE.refl .G)
+          (ModeLE.refl .G))
+        g2
+        (ModeLE.refl .G)
+        (ModeLE.refl .G)) =
+      Dist.bind
+        (Dist.bind
+          (Dist.bind
+            (Dist.gaussian (0 : ℝ) (1 : ℝ))
+            (fun r => Dist.ret (.const (m := .G) r)))
+          (fun g =>
+            Dist.ret
+              (.add
+                (m := .G)
+                g
+                g1
+                (ModeLE.refl .G)
+                (ModeLE.refl .G))))
+        (fun g =>
+          Dist.ret
+            (.add
+              (m := .G)
+              g
+              g2
+              (ModeLE.refl .G)
+              (ModeLE.refl .G))) :=
+  rfl
+
+example :
+    let c0 : TExpr (.float .G) := .const (m := .G) (0 : ℝ)
+    let c1 : TExpr (.float .G) := .const (m := .G) (1 : ℝ)
+    let c2 : TExpr (.float .G) := .const (m := .G) (2 : ℝ)
+    step
+      (.add
+        (m := .G)
+        (.add
+          (m := .G)
+          c0
+          c1
+          (ModeLE.refl .G)
+          (ModeLE.refl .G))
+        c2
+        (ModeLE.refl .G)
+        (ModeLE.refl .G)) =
+      Dist.bind
+        (Dist.ret (.const (m := .G) ((0 : ℝ) + (1 : ℝ))))
+        (fun g =>
+          Dist.ret
+            (.add
+              (m := .G)
+              g
+              c2
+              (ModeLE.refl .G)
+              (ModeLE.refl .G))) :=
+  rfl
+
+
 /-- Relational presentation of the same typed step semantics. -/
 inductive Step {τ : Ty} : TExpr τ → Dist (TExpr τ) → Prop where
   | eval (e : TExpr τ) : Step e (step e)
