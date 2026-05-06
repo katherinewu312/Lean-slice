@@ -70,6 +70,147 @@ Mass on non-value expressions is ignored by the comap to `Val`. -/
 noncomputable def expectedFloatAt {m : Mode} (n : ℕ) (e : TExpr (.float m)) : ℝ :=
   ∫ v, floatVal v ∂(valueDistAt n e)
 
+/-- Deterministic evaluation used by the stuttering semantics. It collapses
+pure deterministic work introduced by determinization, while leaving stochastic
+samplers to the ordinary small-step semantics. -/
+noncomputable def deterministicEval? : {τ : Ty} → TExpr τ → Option (TExpr τ)
+  | _, .var _ =>
+      none
+  | _, .unitE =>
+      some .unitE
+  | _, .const c =>
+      some (.const c)
+  | _, .trueE =>
+      some .trueE
+  | _, .falseE =>
+      some .falseE
+  | _, .letE _ _ _ =>
+      none
+  | _, .lt e1 e2 _ _ =>
+      match deterministicEval? e1, deterministicEval? e2 with
+      | some v1, some v2 =>
+          match floatValue? v1, floatValue? v2 with
+          | some r1, some r2 =>
+              if r1 < r2 then some .trueE else some .falseE
+          | _, _ =>
+              none
+      | _, _ =>
+          none
+  | .float m, .add e1 e2 _ _ =>
+      match deterministicEval? e1, deterministicEval? e2 with
+      | some v1, some v2 =>
+          match floatValue? v1, floatValue? v2 with
+          | some r1, some r2 =>
+              some (.const (m := m) (r1 + r2))
+          | _, _ =>
+              none
+      | _, _ =>
+          none
+  | .float m, .mulG e1 e2 _ _ =>
+      match deterministicEval? e1, deterministicEval? e2 with
+      | some v1, some v2 =>
+          match floatValue? v1, floatValue? v2 with
+          | some r1, some r2 =>
+              some (.const (m := m) (r1 * r2))
+          | _, _ =>
+              none
+      | _, _ =>
+          none
+  | .float m, .mulConstL c e _ _ =>
+      match deterministicEval? e with
+      | some v =>
+          match floatValue? v with
+          | some r =>
+              some (.const (m := m) (c * r))
+          | none =>
+              none
+      | none =>
+          none
+  | .float m, .mulConstR e c _ _ =>
+      match deterministicEval? e with
+      | some v =>
+          match floatValue? v with
+          | some r =>
+              some (.const (m := m) (r * c))
+          | none =>
+              none
+      | none =>
+          none
+  | .float m, .div e1 e2 _ _ =>
+      match deterministicEval? e1, deterministicEval? e2 with
+      | some v1, some v2 =>
+          match floatValue? v1, floatValue? v2 with
+          | some r1, some r2 =>
+              some (.const (m := m) (r1 / r2))
+          | _, _ =>
+              none
+      | _, _ =>
+          none
+  | _, .ifE c t f =>
+      match deterministicEval? c with
+      | some v =>
+          match boolValue? v with
+          | some true =>
+              deterministicEval? t
+          | some false =>
+              deterministicEval? f
+          | none =>
+              none
+      | none =>
+          none
+  | _, .uniform _ _ _ _ =>
+      none
+  | _, .gaussian _ _ _ _ =>
+      none
+  | _, .poisson _ _ =>
+      none
+  | _, .exponential _ _ =>
+      none
+  | _, .beta _ _ _ _ =>
+      none
+  | _, .gamma _ _ _ _ =>
+      none
+  | _, .subsume e h =>
+      match deterministicEval? e with
+      | some v =>
+          subsumedValue? v h
+      | none =>
+          none
+
+/-- One stuttering step for determinized expressions. If deterministic work can
+be collapsed to a value, do it in one logical step; otherwise use the ordinary
+small-step semantics. -/
+noncomputable def stutterStep {τ : Ty} (e : TExpr τ) : Dist (TExpr τ) :=
+  match deterministicEval? e with
+  | some v =>
+      Dist.ret v
+  | none =>
+      step e
+
+/-- The determinized-side `n`-step semantics using stuttering steps. -/
+noncomputable def stutterNstep {τ : Ty} : Nat → TExpr τ → Dist (TExpr τ)
+  | 0, e =>
+      Dist.ret e
+  | n + 1, e =>
+      Dist.bind (stutterNstep n e) (fun e' => stutterStep e')
+
+/-- The stuttered `n`-step distribution restricted to values. -/
+noncomputable def stutterValueDistAt {τ : Ty} (n : ℕ) (e : TExpr τ) :
+    Dist (Val τ) :=
+  Measure.comap (Subtype.val : Val τ → TExpr τ) (stutterNstep n e)
+
+/-- Continuation expectation against the stuttered value-only `n`-step
+approximant. -/
+noncomputable def expectedStutterBindAt {τ : Ty} (n : ℕ) (e : TExpr τ)
+    (K : Val τ → Dist ℝ) : ℝ :=
+  expectedBind (stutterValueDistAt n e) K
+
+private abbrev ContinuationSoundAt {τ : Ty} (e : TExpr τ) : Prop :=
+  ∀ n : ℕ,
+  ∀ K : Val τ → Dist ℝ,
+    RespectsExpectedEquiv K →
+      expectedStutterBindAt n e K = expectedStutterBindAt n (det e) K
+
 /-- The typed distribution equivalence is reflexive. -/
 theorem expectedEquiv_refl {τ : Ty} (μ : Dist (Val τ)) :
     ExpectedEquiv τ μ μ := by
@@ -105,93 +246,169 @@ theorem expectedEquiv_trans {τ : Ty} {μ ν ξ : Dist (Val τ)}
   | float m =>
       cases m <;> exact hμν.trans hνξ
 
-/-- Finite-step continuation form of determinization soundness.
+/-- If `det e = e`, the lockstep stuttering statement is immediate. -/
+lemma det_sound_continuation_self {τ : Ty} (e : TExpr τ)
+    (hdet : det e = e) :
+    ContinuationSoundAt e := by
+  intro n K _hK
+  rw [hdet]
 
-The theorem is stated only in terms of `nstep` approximants. It does not choose
-or compute a syntactic stabilization depth: it only asserts that the two
-finite-step tails eventually agree at the same continuation expectation. -/
+private theorem det_sound_continuation_let_case {τ1 τ2 : Ty}
+    (x : String) (e1 : TExpr τ1) (e2 : TExpr τ2)
+    (ih1 : ContinuationSoundAt e1) (ih2 : ContinuationSoundAt e2) :
+    ContinuationSoundAt (.letE x e1 e2) := by
+  sorry
+
+private theorem det_sound_continuation_lt_case {m1 m2 : Mode}
+    (e1 : TExpr (.float m1)) (e2 : TExpr (.float m2))
+    (h1 : m1 ≼ .G) (h2 : m2 ≼ .G)
+    (ih1 : ContinuationSoundAt e1) (ih2 : ContinuationSoundAt e2) :
+    ContinuationSoundAt (.lt e1 e2 h1 h2) := by
+  sorry
+
+private theorem det_sound_continuation_add_case {m1 m2 m : Mode}
+    (e1 : TExpr (.float m1)) (e2 : TExpr (.float m2))
+    (h1 : m1 ≼ m) (h2 : m2 ≼ m)
+    (ih1 : ContinuationSoundAt e1) (ih2 : ContinuationSoundAt e2) :
+    ContinuationSoundAt (.add (m := m) e1 e2 h1 h2) := by
+  sorry
+
+private theorem det_sound_continuation_mulG_case {m1 m2 m : Mode}
+    (e1 : TExpr (.float m1)) (e2 : TExpr (.float m2))
+    (h1 : m1 ≼ .G) (h2 : m2 ≼ .G)
+    (ih1 : ContinuationSoundAt e1) (ih2 : ContinuationSoundAt e2) :
+    ContinuationSoundAt (.mulG (m := m) e1 e2 h1 h2) := by
+  sorry
+
+private theorem det_sound_continuation_mulConstL_case {m1 m2 m : Mode}
+    (c : ℝ) (e : TExpr (.float m2))
+    (h1 : m1 ≼ m) (h2 : m2 ≼ m)
+    (ih : ContinuationSoundAt e) :
+    ContinuationSoundAt (.mulConstL (m1 := m1) (m := m) c e h1 h2) := by
+  sorry
+
+private theorem det_sound_continuation_mulConstR_case {m1 m2 m : Mode}
+    (e : TExpr (.float m1)) (c : ℝ)
+    (h1 : m1 ≼ m) (h2 : m2 ≼ m)
+    (ih : ContinuationSoundAt e) :
+    ContinuationSoundAt (.mulConstR (m2 := m2) (m := m) e c h1 h2) := by
+  sorry
+
+private theorem det_sound_continuation_div_case {m1 m2 m : Mode}
+    (e1 : TExpr (.float m1)) (e2 : TExpr (.float m2))
+    (h1 : m1 ≼ m) (h2 : m2 ≼ .G)
+    (ih1 : ContinuationSoundAt e1) (ih2 : ContinuationSoundAt e2) :
+    ContinuationSoundAt (.div (m := m) e1 e2 h1 h2) := by
+  sorry
+
+private theorem det_sound_continuation_if_case {τ : Ty}
+    (c : TExpr .bool) (t f : TExpr τ)
+    (ihc : ContinuationSoundAt c) (iht : ContinuationSoundAt t)
+    (ihf : ContinuationSoundAt f) :
+    ContinuationSoundAt (.ifE c t f) := by
+  sorry
+
+private theorem det_sound_continuation_uniform_case {m1 m2 m : Mode}
+    (e1 : TExpr (.float m1)) (e2 : TExpr (.float m2))
+    (h1 : m1 ≼ m) (h2 : m2 ≼ m)
+    (ih1 : ContinuationSoundAt e1) (ih2 : ContinuationSoundAt e2) :
+    ContinuationSoundAt (.uniform (m := m) e1 e2 h1 h2) := by
+  sorry
+
+private theorem det_sound_continuation_gaussian_case {m1 m2 m : Mode}
+    (e1 : TExpr (.float m1)) (e2 : TExpr (.float m2))
+    (h1 : m1 ≼ m) (h2 : m2 ≼ .G)
+    (ih1 : ContinuationSoundAt e1) (ih2 : ContinuationSoundAt e2) :
+    ContinuationSoundAt (.gaussian (m := m) e1 e2 h1 h2) := by
+  sorry
+
+private theorem det_sound_continuation_poisson_case {m1 m : Mode}
+    (e : TExpr (.float m1)) (h : m1 ≼ m)
+    (ih : ContinuationSoundAt e) :
+    ContinuationSoundAt (.poisson (m := m) e h) := by
+  sorry
+
+private theorem det_sound_continuation_exponential_case {m1 m : Mode}
+    (e : TExpr (.float m1)) (h : m1 ≼ .G)
+    (ih : ContinuationSoundAt e) :
+    ContinuationSoundAt (.exponential (m := m) e h) := by
+  sorry
+
+private theorem det_sound_continuation_beta_case {m1 m2 m : Mode}
+    (e1 : TExpr (.float m1)) (e2 : TExpr (.float m2))
+    (h1 : m1 ≼ .G) (h2 : m2 ≼ .G)
+    (ih1 : ContinuationSoundAt e1) (ih2 : ContinuationSoundAt e2) :
+    ContinuationSoundAt (.beta (m := m) e1 e2 h1 h2) := by
+  sorry
+
+private theorem det_sound_continuation_gamma_case {m1 m2 m : Mode}
+    (e1 : TExpr (.float m1)) (e2 : TExpr (.float m2))
+    (h1 : m1 ≼ m) (h2 : m2 ≼ .G)
+    (ih1 : ContinuationSoundAt e1) (ih2 : ContinuationSoundAt e2) :
+    ContinuationSoundAt (.gamma (m := m) e1 e2 h1 h2) := by
+  sorry
+
+private theorem det_sound_continuation_subsume_case {τ1 τ2 : Ty}
+    (e : TExpr τ1) (h : τ1 <: τ2)
+    (ih : ContinuationSoundAt e) :
+    ContinuationSoundAt (.subsume e h) := by
+  sorry
+
+/-- Lockstep finite-step continuation form of determinization soundness.
+
+Both expressions use `stutterNstep`, so deterministic work introduced by either
+side is counted as one logical step. -/
 theorem det_sound_continuation {τ : Ty} (e : TExpr τ)
-    (K : Val τ → Dist ℝ) (hK : RespectsExpectedEquiv K) :
-    ∃ L N M,
-      (∀ n ≥ N, expectedBindAt n e K = L) ∧
-      (∀ k ≥ M, expectedBindAt k (det e) K = L) := by
+    (n : ℕ) (K : Val τ → Dist ℝ) (hK : RespectsExpectedEquiv K) :
+    expectedStutterBindAt n e K = expectedStutterBindAt n (det e) K := by
+  revert hK
+  revert K
+  revert n
+  change ContinuationSoundAt e
   induction e with
   | var x =>
-      sorry
+      exact det_sound_continuation_self _ rfl
   | unitE =>
-      sorry
+      exact det_sound_continuation_self .unitE rfl
   | const c =>
-      sorry
+      exact det_sound_continuation_self (.const c) rfl
   | trueE =>
-      sorry
+      exact det_sound_continuation_self .trueE rfl
   | falseE =>
-      sorry
+      exact det_sound_continuation_self .falseE rfl
   | letE x e1 e2 ih1 ih2 =>
-      -- Needs compositional finite-step lemmas for `let`, plus a lemma saying
-      -- the substituted body induces a continuation that respects equivalence.
-      sorry
+      exact det_sound_continuation_let_case x e1 e2 ih1 ih2
   | lt e1 e2 h1 h2 ih1 ih2 =>
-      -- Needs compositional big-step lemmas for left-to-right evaluation of
-      -- comparisons. Since both operands are `Float G`, the IHs provide
-      -- distribution equality for the operand semantics.
-      sorry
+      exact det_sound_continuation_lt_case e1 e2 h1 h2 ih1 ih2
   | add e1 e2 h1 h2 ih1 ih2 =>
-      -- Needs the compositional rule for addition. The `Float E` result case
-      -- uses linearity of expectation; the `Float G` result case uses equality
-      -- of operand distributions.
-      sorry
+      exact det_sound_continuation_add_case e1 e2 h1 h2 ih1 ih2
   | mulG e1 e2 h1 h2 ih1 ih2 =>
-      -- Both operands must be `Float G`; use the IHs at distribution equality
-      -- plus compositionality of multiplication.
-      sorry
+      exact det_sound_continuation_mulG_case e1 e2 h1 h2 ih1 ih2
   | mulConstL c e h1 h2 ih =>
-      -- The `Float E` case uses scaling of expected values; the `Float G` case
-      -- uses equality of the operand distribution.
-      sorry
+      exact det_sound_continuation_mulConstL_case c e h1 h2 ih
   | mulConstR e c h1 h2 ih =>
-      -- Same proof shape as `mulConstL`.
-      sorry
+      exact det_sound_continuation_mulConstR_case e c h1 h2 ih
   | div e1 e2 h1 h2 ih1 ih2 =>
-      -- The denominator is `Float G`, so the non-linear dependence is kept in
-      -- distribution equality; the numerator may be handled by expectation.
-      sorry
+      exact det_sound_continuation_div_case e1 e2 h1 h2 ih1 ih2
   | ifE c t f ihc iht ihf =>
-      -- Needs the compositional rule for conditionals. The condition is `Bool`,
-      -- so the IH gives distribution equality over branches.
-      sorry
+      exact det_sound_continuation_if_case c t f ihc iht ihf
   | uniform e1 e2 h1 h2 ih1 ih2 =>
-      -- For result mode `G`, determinization preserves `uniform` and the IHs
-      -- give operand distribution equality. For result mode `E`, this is the
-      -- primitive moment law `E[Uniform a b] = (a + b) / 2`, combined with the
-      -- operand IHs.
-      sorry
+      exact det_sound_continuation_uniform_case e1 e2 h1 h2 ih1 ih2
   | gaussian e1 e2 h1 h2 ih1 ih2 =>
-      -- For result mode `E`, this uses `E[Gaussian μ σ] = μ`; for result mode
-      -- `G`, it uses preservation of the primitive sampler plus operand IHs.
-      sorry
+      exact det_sound_continuation_gaussian_case e1 e2 h1 h2 ih1 ih2
   | poisson e h ih =>
-      -- For result mode `E`, this uses `E[Poisson λ] = λ`; for result mode
-      -- `G`, it uses preservation of the primitive sampler plus the operand IH.
-      sorry
+      exact det_sound_continuation_poisson_case e h ih
   | exponential e h ih =>
-      -- For result mode `E`, this uses `E[Exponential λ] = 1 / λ`; the input is
-      -- `Float G`, so the IH gives equality of its full distribution.
-      sorry
+      exact det_sound_continuation_exponential_case e h ih
   | beta e1 e2 h1 h2 ih1 ih2 =>
-      -- For result mode `E`, this uses `E[Beta a b] = a / (a + b)`; both
-      -- parameters are `Float G`.
-      sorry
+      exact det_sound_continuation_beta_case e1 e2 h1 h2 ih1 ih2
   | gamma e1 e2 h1 h2 ih1 ih2 =>
-      -- For result mode `E`, this uses `E[Gamma k θ] = k / θ` in the convention
-      -- encoded by `det`; the second parameter is `Float G`.
-      sorry
+      exact det_sound_continuation_gamma_case e1 e2 h1 h2 ih1 ih2
   | subsume e h ih =>
-      -- Needs a compositional lemma for subsumption and a proof that subsuming a
-      -- value transports the corresponding observation equivalence.
-      sorry
+      exact det_sound_continuation_subsume_case e h ih
 
-/-- The eventual finite-step continuation theorem can be lifted to `sem` once
-the finite approximants are connected to the `iSup` semantics. -/
+/-- The lockstep finite-step continuation theorem can be lifted to `sem` once
+the stuttered finite approximants are connected to the `iSup` semantics. -/
 theorem det_sound_continuation_sem {τ : Ty} (e : TExpr τ)
     (K : Val τ → Dist ℝ) (hK : RespectsExpectedEquiv K) :
     expectedBind (sem e) K = expectedBind (sem (det e)) K := by
