@@ -17,6 +17,13 @@ def floatVal {m : Mode} (v : Val (.float m)) : ℝ :=
   | _ =>
       0
 
+/-- The expression measurable spaces are discrete in the current model, so the
+float observation is measurable. -/
+theorem measurable_floatVal {m : Mode} :
+    Measurable (@floatVal m) := by
+  intro s _hs
+  exact ⟨_, by trivial, Set.preimage_image_eq _ Subtype.val_injective⟩
+
 /-- Expected value of the big-step semantics of a float expression. -/
 noncomputable def expectedFloat {m : Mode} (e : TExpr (.float m)) : ℝ :=
   ∫ v, floatVal v ∂(sem e)
@@ -50,6 +57,15 @@ notation "Eqv[" τ "](" μ ", " ν ")" => ExpectedEquiv τ μ ν
 /-- Continuation bind followed by real expectation. -/
 noncomputable def expectedBind {τ : Ty} (μ : Dist (Val τ)) (K : Val τ → Dist ℝ) : ℝ :=
   expectedReal (Dist.bind μ K)
+
+/-- Binding the float observation continuation is the same as directly taking
+the float expectation. -/
+theorem expectedBind_floatVal_ret {m : Mode} (μ : Dist (Val (.float m))) :
+    expectedBind μ (fun v => Dist.ret (floatVal v)) = expectedFloatDist μ := by
+  unfold expectedBind expectedReal expectedFloatDist Dist.ret
+  rw [show (μ.bind fun v => Measure.dirac (floatVal v)) = μ.map floatVal by
+    exact Measure.bind_dirac_eq_map μ measurable_floatVal]
+  exact integral_map measurable_floatVal.aemeasurable (by fun_prop)
 
 /-- A continuation respects the observation equivalence at its input type when
 equivalent input distributions produce the same real expectation after bind. -/
@@ -126,7 +142,16 @@ theorem det_sound {m : Mode} (e : TExpr (.float m)) :
     expectedFloat e = expectedFloat (det e) := by
   let K : Val (.float m) → Dist ℝ := fun v => Dist.ret (floatVal v)
   have hK : RespectsExpectedEquiv K := by
-    sorry
+    intro μ ν hμν
+    cases m with
+    | E =>
+        change expectedFloatDist μ = expectedFloatDist ν at hμν
+        rw [expectedBind_floatVal_ret, expectedBind_floatVal_ret]
+        exact hμν
+    | G =>
+        unfold ExpectedEquiv at hμν
+        subst ν
+        rfl
   have hleft : expectedFloat e = expectedBind (sem e) K := by
     sorry
   have hright : expectedFloat (det e) = expectedBind (sem (det e)) K := by
