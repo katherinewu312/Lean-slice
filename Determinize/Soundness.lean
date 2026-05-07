@@ -126,7 +126,47 @@ part of the proof: determinization preserves the relevant observation at every
 type. -/
 theorem det_sound_sem {τ : Ty} (e : TExpr τ) :
     ExpectedEquiv τ (sem e) (sem (det e)) := by
-  sorry
+  induction e with
+  | var x =>
+      simpa [det] using expectedEquiv_refl (sem (.var x))
+  | unitE =>
+      simpa [det] using expectedEquiv_refl (sem .unitE)
+  | const c =>
+      simpa [det] using expectedEquiv_refl (sem (.const c))
+  | trueE =>
+      simpa [det] using expectedEquiv_refl (sem .trueE)
+  | falseE =>
+      simpa [det] using expectedEquiv_refl (sem .falseE)
+  | letE x e1 e2 ih1 ih2 =>
+      sorry
+  | lt e1 e2 h1 h2 ih1 ih2 =>
+      sorry
+  | add e1 e2 h1 h2 ih1 ih2 =>
+      sorry
+  | mulG e1 e2 h1 h2 ih1 ih2 =>
+      sorry
+  | mulConstL c e h1 h2 ih =>
+      sorry
+  | mulConstR e c h1 h2 ih =>
+      sorry
+  | div e1 e2 h1 h2 ih1 ih2 =>
+      sorry
+  | ifE c t f ihc iht ihf =>
+      sorry
+  | uniform e1 e2 h1 h2 ih1 ih2 =>
+      sorry
+  | gaussian e1 e2 h1 h2 ih1 ih2 =>
+      sorry
+  | poisson e h ih =>
+      sorry
+  | exponential e h ih =>
+      sorry
+  | beta e1 e2 h1 h2 ih1 ih2 =>
+      sorry
+  | gamma e1 e2 h1 h2 ih1 ih2 =>
+      sorry
+  | subsume e h ih =>
+      sorry
 
 /-- Continuations that respect expected equivalence give equal expectations on
 any pair of equivalent value distributions. -/
@@ -153,9 +193,9 @@ theorem det_sound {m : Mode} (e : TExpr (.float m)) :
         subst ν
         rfl
   have hleft : expectedFloat e = expectedBind (sem e) K := by
-    sorry
+    exact (expectedBind_floatVal_ret (sem e)).symm
   have hright : expectedFloat (det e) = expectedBind (sem (det e)) K := by
-    sorry
+    exact (expectedBind_floatVal_ret (sem (det e))).symm
   calc
     expectedFloat e = expectedBind (sem e) K :=
       hleft
