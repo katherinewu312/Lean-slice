@@ -105,6 +105,13 @@ theorem expectedEquiv_trans {τ : Ty} {μ ν ξ : Dist (Val τ)}
   | float m =>
       cases m <;> exact hμν.trans hνξ
 
+/-- Semantic form of determinization soundness. This is the induction-driven
+part of the proof: determinization preserves the relevant observation at every
+type. -/
+theorem det_sound_sem {τ : Ty} (e : TExpr τ) :
+    ExpectedEquiv τ (sem e) (sem (det e)) := by
+  sorry
+
 /-- Continuations that respect expected equivalence give equal expectations on
 any pair of equivalent value distributions. -/
 theorem det_sound_continuation {τ : Ty} (μ₁ μ₂ : Dist (Val τ))
@@ -124,13 +131,11 @@ theorem det_sound {m : Mode} (e : TExpr (.float m)) :
     sorry
   have hright : expectedFloat (det e) = expectedBind (sem (det e)) K := by
     sorry
-  have hsem : ExpectedEquiv (.float m) (sem e) (sem (det e)) := by
-    sorry
   calc
     expectedFloat e = expectedBind (sem e) K :=
       hleft
     _ = expectedBind (sem (det e)) K :=
-      det_sound_continuation (sem e) (sem (det e)) K hK hsem
+      det_sound_continuation (sem e) (sem (det e)) K hK (det_sound_sem e)
     _ = expectedFloat (det e) :=
       hright.symm
 
