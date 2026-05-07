@@ -184,6 +184,132 @@ noncomputable def ltLeftK
   fun v1 =>
     Dist.bind (sem e2) (ltRightK v1 K)
 
+/-- Comapping a Dirac measure at an embedded value recovers the Dirac measure
+on the value subtype. -/
+theorem comap_dirac_value {τ : Ty} (v : Val τ) :
+    Measure.comap (Subtype.val : Val τ → TExpr τ) (Measure.dirac (v : TExpr τ)) =
+      Measure.dirac v := by
+  ext A hA
+  rw [Measure.comap_apply (Subtype.val : Val τ → TExpr τ) Subtype.val_injective
+    (fun _ _ => by trivial) _ hA]
+  rw [Measure.dirac_apply, Measure.dirac_apply]
+  by_cases hv : v ∈ A
+  · have himg : (v : TExpr τ) ∈ Set.image (Subtype.val : Val τ → TExpr τ) A :=
+      ⟨v, hv, rfl⟩
+    simp [Set.indicator_of_mem, hv, himg]
+  · have himg : (v : TExpr τ) ∉ Set.image (Subtype.val : Val τ → TExpr τ) A := by
+      intro h
+      rcases h with ⟨w, hw, hwv⟩
+      exact hv (Subtype.val_injective hwv ▸ hw)
+    simp [Set.indicator_of_notMem, hv, himg]
+
+/-- Values are absorbing for the small-step semantics. -/
+theorem step_value {τ : Ty} (v : Val τ) :
+    step (v : TExpr τ) = Dist.ret (v : TExpr τ) := by
+  rcases v with ⟨t, hv⟩
+  cases τ <;> cases t <;>
+    simp [Val, isValue, unitValue?, boolValue?, floatValue?, step] at hv ⊢
+
+/-- Any finite-step approximation of a value is the same value. -/
+theorem nstep_value {τ : Ty} (v : Val τ) (n : ℕ) :
+    nstep n (v : TExpr τ) = Dist.ret (v : TExpr τ) := by
+  induction n with
+  | zero =>
+      rfl
+  | succ n ih =>
+      rw [nstep, ih]
+      unfold Dist.ret Dist.bind
+      rw [Measure.dirac_bind]
+      · exact step_value v
+      · fun_prop
+
+/-- The big-step semantics of a value is the corresponding Dirac distribution. -/
+theorem sem_value {τ : Ty} (v : Val τ) :
+    sem (v : TExpr τ) = Dist.ret v := by
+  apply le_antisymm
+  · apply iSup_le
+    intro n
+    rw [nstep_value v n]
+    simp [Dist.ret, comap_dirac_value]
+  · exact le_iSup_of_le 0 (by
+      rw [nstep_value v 0]
+      simp [Dist.ret, comap_dirac_value])
+
+/-- Every function out of a value subtype is measurable in the current discrete
+expression model. -/
+theorem measurable_from_val {τ : Ty} {α : Type} [MeasurableSpace α]
+    (f : Val τ → α) :
+    Measurable f := by
+  intro s _hs
+  rw [← Set.preimage_image_eq (Set.preimage f s) Subtype.val_injective]
+  exact ⟨_, by trivial, rfl⟩
+
+/-- A monotone supremum of measures is pointwise on measurable sets. -/
+theorem measure_iSup_apply_of_monotone {α : Type} [MeasurableSpace α]
+    (μ : ℕ → Measure α) (hμ : Monotone μ) {A : Set α} (hA : MeasurableSet A) :
+    (⨆ n, μ n) A = ⨆ n, μ n A := by
+  let ν : Measure α := Measure.ofMeasurable (fun s _ => ⨆ n, μ n s)
+    (by simp)
+    (by
+      intro f hf hdisj
+      simp_rw [measure_iUnion hdisj hf]
+      simp_rw [ENNReal.tsum_eq_iSup_sum]
+      have hsum : ∀ s : Finset ℕ,
+          (∑ a ∈ s, ⨆ n, μ n (f a)) = ⨆ n, ∑ a ∈ s, μ n (f a) := by
+        intro s
+        exact ENNReal.finsetSum_iSup_of_monotone
+          (fun i n m hnm => hμ hnm (f i))
+      simp_rw [hsum]
+      rw [iSup_comm])
+  have hν_apply : ∀ s, MeasurableSet s → ν s = ⨆ n, μ n s := by
+    intro s hs
+    exact Measure.ofMeasurable_apply s hs
+  have hle : (⨆ n, μ n) ≤ ν := by
+    apply iSup_le
+    intro n
+    rw [Measure.le_iff]
+    intro s hs
+    rw [hν_apply s hs]
+    exact le_iSup (fun m => μ m s) n
+  have hν_le : ν ≤ (⨆ n, μ n) := by
+    rw [Measure.le_iff]
+    intro s hs
+    rw [hν_apply s hs]
+    exact iSup_le fun n => le_iSup (fun m => μ m) n s
+  rw [← hν_apply A hA]
+  exact le_antisymm (hle A) (hν_le A)
+
+/-- Big-step decomposition for evaluating the left operand of `<`. -/
+theorem sem_lt_left
+    (e1 e2 : TExpr (.float .G)) :
+    sem (.lt e1 e2 (ModeLE.refl .G) (ModeLE.refl .G))
+      =
+    Dist.bind (sem e1) fun v1 =>
+      sem (.lt (v1 : TExpr (.float .G)) e2 (ModeLE.refl .G) (ModeLE.refl .G)) := by
+  /-
+  This is the finite-approximant/iSup step: the total fuel used by
+  `lt e1 e2` splits into fuel for `e1` and then fuel for the continuation.
+  -/
+  sorry
+
+/-- Big-step decomposition for evaluating the right operand of `<` once the
+left operand is already a value. -/
+theorem sem_lt_right
+    (v1 : Val (.float .G))
+    (e2 : TExpr (.float .G)) :
+    sem (.lt (v1 : TExpr (.float .G)) e2 (ModeLE.refl .G) (ModeLE.refl .G))
+      =
+    Dist.bind (sem e2) fun v2 =>
+      if floatVal v1 < floatVal v2 then
+        Dist.ret trueVal
+      else
+        Dist.ret falseVal := by
+  /-
+  This is the second finite-approximant/iSup step: with the left value fixed,
+  the remaining fuel is exactly the fuel for `e2`, followed by one comparison
+  step.
+  -/
+  sorry
 
 /-- Big-step/continuation form of the semantics of `<`.
 
@@ -199,7 +325,11 @@ theorem sem_lt
         if floatVal v1 < floatVal v2 then
           Dist.ret trueVal
         else
-          Dist.ret falseVal := by sorry
+          Dist.ret falseVal := by
+  rw [sem_lt_left e1 e2]
+  apply Measure.bind_congr_right
+  filter_upwards with v1
+  exact sem_lt_right v1 e2
 
 theorem expectedBind_sem_lt
     (e1 e2 : TExpr (.float .G))
@@ -207,14 +337,24 @@ theorem expectedBind_sem_lt
     expectedBind (sem (.lt e1 e2 (ModeLE.refl .G) (ModeLE.refl .G))) K
       =
     expectedBind (sem e1) (ltLeftK e2 K) := by
-  /-
-  This is the semantic lemma corresponding to the `step` rule for `.lt`.
-
-  You will prove this from your definitions of `sem`, `nstep`, and `step`.
-  It is the same kind of lemma you will also want for `add`, `if`, `let`, etc.
-  -/
-
-  sorry
+  rw [sem_lt]
+  unfold expectedBind ltLeftK ltRightK
+  unfold Dist.bind
+  apply congrArg expectedReal
+  rw [Measure.bind_bind]
+  ·
+    apply Measure.bind_congr_right
+    filter_upwards with v1
+    rw [Measure.bind_bind]
+    · apply Measure.bind_congr_right
+      filter_upwards with v2
+      by_cases h : floatVal v1 < floatVal v2
+      · simp [h, Dist.ret, Measure.dirac_bind (measurable_from_val K) trueVal]
+      · simp [h, Dist.ret, Measure.dirac_bind (measurable_from_val K) falseVal]
+    · exact (measurable_from_val _).aemeasurable
+    · exact (measurable_from_val K).aemeasurable
+  · exact (measurable_from_val _).aemeasurable
+  · exact (measurable_from_val K).aemeasurable
 
 
 /-- If two right-hand expressions give the same expected result under every
