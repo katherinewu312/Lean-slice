@@ -129,6 +129,146 @@ theorem det_sound_continuation {τ : Ty} (μ₁ μ₂ : Dist (Val τ))
     expectedBind μ₁ K = expectedBind μ₂ K := by
   exact hK μ₁ μ₂ hμ
 
+
+/-- Boolean true as a value. -/
+def trueVal : Val .bool :=
+  ⟨.trueE, by simp [Val, isValue, boolValue?]⟩
+
+/-- Boolean false as a value. -/
+def falseVal : Val .bool :=
+  ⟨.falseE, by simp [Val, isValue, boolValue?]⟩
+
+/-- At `Float G`, `ExpectedEquiv` is equality of value distributions, so every
+continuation respects it. -/
+theorem respectsExpectedEquiv_floatG_any
+    (K : Val (.float .G) → Dist ℝ) :
+    RespectsExpectedEquiv K := by
+  intro μ ν hμν
+  change μ = ν at hμν
+  subst ν
+  rfl
+
+/-- At `Bool`, `ExpectedEquiv` is equality of value distributions, so every
+continuation respects it. -/
+theorem respectsExpectedEquiv_bool_any
+    (K : Val .bool → Dist ℝ) :
+    RespectsExpectedEquiv K := by
+  intro μ ν hμν
+  change μ = ν at hμν
+  subst ν
+  rfl
+
+/-- Right-hand continuation for `<`.
+
+Once the left value `v1` has been evaluated, this continuation evaluates the
+right value `v2`, performs the comparison, and then continues with `K`.
+-/
+noncomputable def ltRightK
+    (v1 : Val (.float .G))
+    (K : Val .bool → Dist ℝ) :
+    Val (.float .G) → Dist ℝ :=
+  fun v2 =>
+    if floatVal v1 < floatVal v2 then
+      K trueVal
+    else
+      K falseVal
+
+/-- Left-hand continuation for `<`.
+
+This is the continuation passed to the IH for `e1`.
+-/
+noncomputable def ltLeftK
+    (e2 : TExpr (.float .G))
+    (K : Val .bool → Dist ℝ) :
+    Val (.float .G) → Dist ℝ :=
+  fun v1 =>
+    Dist.bind (sem e2) (ltRightK v1 K)
+
+
+/-- Big-step/continuation form of the semantics of `<`.
+
+This packages the left-to-right evaluation behavior of `lt`: evaluate `e1`,
+then evaluate `e2`, then compare the resulting float values.
+-/
+theorem sem_lt
+    (e1 e2 : TExpr (.float .G)) :
+    sem (.lt e1 e2 (ModeLE.refl .G) (ModeLE.refl .G))
+      =
+    Dist.bind (sem e1) fun v1 =>
+      Dist.bind (sem e2) fun v2 =>
+        if floatVal v1 < floatVal v2 then
+          Dist.ret trueVal
+        else
+          Dist.ret falseVal := by sorry
+
+theorem expectedBind_sem_lt
+    (e1 e2 : TExpr (.float .G))
+    (K : Val .bool → Dist ℝ) :
+    expectedBind (sem (.lt e1 e2 (ModeLE.refl .G) (ModeLE.refl .G))) K
+      =
+    expectedBind (sem e1) (ltLeftK e2 K) := by
+  /-
+  This is the semantic lemma corresponding to the `step` rule for `.lt`.
+
+  You will prove this from your definitions of `sem`, `nstep`, and `step`.
+  It is the same kind of lemma you will also want for `add`, `if`, `let`, etc.
+  -/
+
+  sorry
+
+
+/-- If two right-hand expressions give the same expected result under every
+comparison continuation, then the corresponding left continuations have the
+same expected result pointwise.
+-/
+theorem ltLeftK_det_congr
+    (e2 : TExpr (.float .G))
+    (ih2 :
+      ∀ K : Val (.float .G) → Dist ℝ,
+        RespectsExpectedEquiv K →
+        expectedBind (sem e2) K = expectedBind (sem (det e2)) K)
+    (K : Val .bool → Dist ℝ)
+    (v1 : Val (.float .G)) :
+    expectedReal (ltLeftK e2 K v1)
+      =
+    expectedReal (ltLeftK (det e2) K v1) := by
+  unfold ltLeftK
+  exact ih2 (ltRightK v1 K) (respectsExpectedEquiv_floatG_any (ltRightK v1 K))
+
+/-- Expectation law for bind. -/
+theorem expectedReal_bind {τ : Ty}
+    (μ : Dist (Val τ))
+    (K : Val τ → Dist ℝ) :
+    expectedReal (Dist.bind μ K) = ∫ v, expectedReal (K v) ∂μ := by
+  /-
+  This is the real-valued bind law:
+
+      E[μ >>= K] = ∫ v, E[K v] dμ.
+
+  The proof should follow from the corresponding `lintegral` bind law plus the
+  positive/negative decomposition of the Bochner integral.
+  -/
+  sorry
+
+/-- Congruence for `expectedBind`.
+
+If two continuations have the same real expectation at every value, then
+binding either one against the same input distribution gives the same real
+expectation.
+-/
+theorem expectedBind_congr_expected {τ : Ty}
+    (μ : Dist (Val τ))
+    (K₁ K₂ : Val τ → Dist ℝ)
+    (hK : ∀ v, expectedReal (K₁ v) = expectedReal (K₂ v)) :
+    expectedBind μ K₁ = expectedBind μ K₂ := by
+  calc
+    expectedBind μ K₁ = ∫ v, expectedReal (K₁ v) ∂μ := by
+      simpa [expectedBind] using expectedReal_bind μ K₁
+    _ = ∫ v, expectedReal (K₂ v) ∂μ := by
+      exact integral_congr_ae (Filter.Eventually.of_forall hK)
+    _ = expectedBind μ K₂ := by
+      simpa [expectedBind] using (expectedReal_bind μ K₂).symm
+
 /-- Strong continuation form of determinization soundness.
 
 This is the theorem that should be proved by induction. Intuitively, every context/continuation that respects
@@ -177,18 +317,56 @@ theorem det_sound_cps {τ : Ty} (e : TExpr τ) :
 
   | lt e1 e2 h1 h2 ih1 ih2 =>
       intro K hK
+
+      /-
+      Since `<` needs `Float G` operands, these cases should force the operand
+      modes to be `.G`. The impossible `.E ≼ .G` cases disappear because of
+      `not_e_le_g`.
+      -/
       cases h1
       cases h2
+
       /-
-      After the mode proofs are eliminated, both operands are `Float G`, so
-      `ih1` and `ih2` are strong enough to identify their full value
-      distributions.  To finish this branch, we still need the compositional
-      big-step law for `lt`: evaluating `lt e1 e2` should be equivalent to
-      binding the semantics of `e1`, then the semantics of `e2`, then applying
-      the boolean continuation.  That law is not currently available from the
-      imported big-step API.
+      Goal is now morally:
+
+        expectedBind (sem (e1 < e2)) K
+        =
+        expectedBind (sem (det e1 < det e2)) K
+
+      Expand both sides using the semantic lemma for `<`.
       -/
-      sorry
+      simp only [det]
+      rw [expectedBind_sem_lt e1 e2 K]
+      rw [expectedBind_sem_lt (det e1) (det e2) K]
+
+      /-
+      Now use the IH for `e1`.
+
+      The continuation for `e1` is:
+        ltLeftK e2 K
+
+      Since `e1 : Float G`, every continuation respects `ExpectedEquiv`.
+      -/
+      calc
+        expectedBind (sem e1) (ltLeftK e2 K)
+            =
+        expectedBind (sem (det e1)) (ltLeftK e2 K) := by
+          exact ih1 (ltLeftK e2 K)
+            (respectsExpectedEquiv_floatG_any (ltLeftK e2 K))
+
+        _ =
+        expectedBind (sem (det e1)) (ltLeftK (det e2) K) := by
+          /-
+          This step uses `ih2` pointwise inside the continuation.
+
+          You will probably need an expectation-bind congruence lemma here:
+          if two continuations have the same expected real result pointwise,
+          then binding against the same distribution gives the same expected
+          real result.
+          -/
+          apply expectedBind_congr_expected
+          intro v1
+          exact ltLeftK_det_congr e2 ih2 K v1
 
   | add e1 e2 h1 h2 ih1 ih2 =>
       intro K hK
