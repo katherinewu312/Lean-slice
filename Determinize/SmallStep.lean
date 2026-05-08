@@ -98,10 +98,7 @@ noncomputable def step : {τ : Ty} → TExpr τ → Dist (TExpr τ)
   | .float m, .uniform e1 e2 h1 h2 =>
       match floatValue? e1, floatValue? e2 with
       | some v1, some v2 =>
-          if v1 < v2 then
-            Dist.bind (Dist.uniform v1 v2) (fun r => Dist.ret (.const (m := m) r))
-          else
-            0
+          Dist.bind (Dist.uniform v1 v2) (fun r => Dist.ret (.const (m := m) r))
       | some v1, none =>
           Dist.bind (step e2) (fun g => Dist.ret (.uniform (.const v1) g h1 h2))
       | none, _ =>
