@@ -1,10 +1,12 @@
 import Determinize.BigStep
 import Determinize.Determinization
 import Mathlib.MeasureTheory.Integral.Bochner.Basic
+import Mathlib.MeasureTheory.Integral.Lebesgue.Map
 
 namespace Determinize
 
 open MeasureTheory
+open scoped ENNReal
 
 namespace TExpr
 
@@ -129,7 +131,6 @@ theorem det_sound_continuation {τ : Ty} (μ₁ μ₂ : Dist (Val τ))
     expectedBind μ₁ K = expectedBind μ₂ K := by
   exact hK μ₁ μ₂ hμ
 
-
 /-- Boolean true as a value. -/
 def trueVal : Val .bool :=
   ⟨.trueE, by simp [Val, isValue, boolValue?]⟩
@@ -244,6 +245,14 @@ theorem measurable_from_val {τ : Ty} {α : Type} [MeasurableSpace α]
   rw [← Set.preimage_image_eq (Set.preimage f s) Subtype.val_injective]
   exact ⟨_, by trivial, rfl⟩
 
+/-- Every function out of a typed expression space is measurable in the
+current discrete expression model. -/
+theorem measurable_from_texpr {τ : Ty} {α : Type} [MeasurableSpace α]
+    (f : TExpr τ → α) :
+    Measurable f := by
+  intro s _hs
+  trivial
+
 /-- A monotone supremum of measures is pointwise on measurable sets. -/
 theorem measure_iSup_apply_of_monotone {α : Type} [MeasurableSpace α]
     (μ : ℕ → Measure α) (hμ : Monotone μ) {A : Set α} (hA : MeasurableSet A) :
@@ -279,6 +288,471 @@ theorem measure_iSup_apply_of_monotone {α : Type} [MeasurableSpace α]
   rw [← hν_apply A hA]
   exact le_antisymm (hle A) (hν_le A)
 
+/-- Value-only finite approximants are monotone as measures. -/
+theorem value_approximants_mono {τ : Ty} (e : TExpr τ) :
+    Monotone
+      (fun n : ℕ =>
+        Measure.comap (Subtype.val : Val τ → TExpr τ) (nstep n e)) := by
+  intro n m hnm
+  induction hnm with
+  | refl =>
+      exact le_rfl
+  | @step m _ ih =>
+      exact le_trans ih (by
+        rw [Measure.le_iff]
+        intro A hA
+        exact nstep_value_succ_le e hA m)
+
+/-- The `n + 1` step distribution can be factored through the first step. -/
+theorem nstep_succ_bind {τ : Ty} (e : TExpr τ) :
+    ∀ n : ℕ,
+      nstep (n + 1) e =
+        Measure.bind (step e) (fun e' => nstep n e') := by
+  intro n
+  induction n generalizing e with
+  | zero =>
+      simp [nstep, Dist.bind, Dist.ret,
+        Measure.dirac_bind
+          (measurable_from_texpr (step : TExpr τ → Dist (TExpr τ))) e,
+        Measure.bind_dirac]
+  | succ n ih =>
+      rw [nstep, ih]
+      change
+        Measure.bind
+            (Measure.bind (step e) (fun e' => nstep n e'))
+            (fun e' => step e')
+          =
+        Measure.bind (step e) (fun e' => nstep (n + 1) e')
+      rw [Measure.bind_bind
+        ((measurable_from_texpr
+          (fun e' : TExpr τ => nstep n e')).aemeasurable)
+        ((measurable_from_texpr
+          (step : TExpr τ → Dist (TExpr τ))).aemeasurable)]
+      apply Measure.bind_congr_right
+      filter_upwards with e'
+      rw [nstep]
+      rfl
+
+/-- Integrating against a monotone supremum of measures is the supremum of the
+integrals. -/
+theorem lintegral_iSup_measure_of_monotone {α : Type} [MeasurableSpace α]
+    (μ : ℕ → Measure α) (hμ : Monotone μ)
+    {f : α → ℝ≥0∞} (hf : Measurable f) :
+    (∫⁻ x, f x ∂(⨆ n, μ n)) =
+      ⨆ n, (∫⁻ x, f x ∂(μ n)) := by
+  have hsimple : ∀ φ : SimpleFunc α ℝ≥0∞,
+      φ.lintegral (⨆ n, μ n) = ⨆ n, φ.lintegral (μ n) := by
+    intro φ
+    calc
+      φ.lintegral (⨆ n, μ n)
+          = ∑ x ∈ φ.range, x * (⨆ n, μ n) (φ ⁻¹' {x}) := by
+              rfl
+      _ = ∑ x ∈ φ.range, x * (⨆ n, μ n (φ ⁻¹' {x})) := by
+              apply Finset.sum_congr rfl
+              intro x _hx
+              rw [measure_iSup_apply_of_monotone μ hμ
+                (SimpleFunc.measurableSet_preimage φ {x})]
+      _ = ∑ x ∈ φ.range, ⨆ n, x * μ n (φ ⁻¹' {x}) := by
+              simp [ENNReal.mul_iSup]
+      _ = ⨆ n, ∑ x ∈ φ.range, x * μ n (φ ⁻¹' {x}) := by
+              rw [ENNReal.finsetSum_iSup_of_monotone]
+              intro x n m hnm
+              exact mul_le_mul_right (hμ hnm (φ ⁻¹' {x})) x
+      _ = ⨆ n, φ.lintegral (μ n) := by
+              rfl
+  calc
+    (∫⁻ x, f x ∂(⨆ n, μ n))
+        = ⨆ k, (SimpleFunc.eapprox f k).lintegral (⨆ n, μ n) := by
+            exact lintegral_eq_iSup_eapprox_lintegral hf
+    _ = ⨆ k, ⨆ n, (SimpleFunc.eapprox f k).lintegral (μ n) := by
+            simp_rw [hsimple]
+    _ = ⨆ n, ⨆ k, (SimpleFunc.eapprox f k).lintegral (μ n) := by
+            exact iSup_comm
+    _ = ⨆ n, (∫⁻ x, f x ∂(μ n)) := by
+            simp_rw [lintegral_eq_iSup_eapprox_lintegral hf]
+
+/-- Continuation expectation against a value-only finite approximant. -/
+noncomputable def linExpectedAt {τ : Ty} (n : ℕ) (e : TExpr τ)
+    (K : Val τ → ℝ≥0∞) : ℝ≥0∞ :=
+  ∫⁻ v, K v ∂(valueDistAt n e)
+
+/-- The zeroth value approximant of a non-value has no value mass. -/
+theorem valueDistAt_zero_nonvalue {τ : Ty} {e : TExpr τ}
+    (he : isValue e = false) :
+    valueDistAt 0 e = 0 := by
+  ext A hA
+  unfold valueDistAt nstep Dist.ret
+  rw [Measure.comap_apply (Subtype.val : Val τ → TExpr τ)
+    Subtype.val_injective (fun _ _ => by trivial) _ hA]
+  rw [Measure.dirac_apply' _ (by trivial :
+    MeasurableSet ((Subtype.val : Val τ → TExpr τ) '' A))]
+  have hnot : e ∉ (Subtype.val : Val τ → TExpr τ) '' A := by
+    intro hmem
+    rcases hmem with ⟨v, _hvA, hv⟩
+    have hvval : isValue e = true := by
+      rw [← hv]
+      exact v.property
+    rw [he] at hvval
+    contradiction
+  simp [hnot]
+
+/-- The zeroth value approximant of a value is the corresponding Dirac mass. -/
+theorem valueDistAt_zero_value {τ : Ty} (v : Val τ) :
+    valueDistAt 0 (v : TExpr τ) = Dist.ret v := by
+  unfold valueDistAt nstep Dist.ret
+  rw [comap_dirac_value v]
+
+/-- Every finite value approximant is bounded by the big-step semantics. -/
+theorem valueDistAt_le_sem {τ : Ty} (n : ℕ) (e : TExpr τ) :
+    valueDistAt n e ≤ sem e := by
+  unfold valueDistAt sem
+  exact le_iSup (fun n : ℕ =>
+    Measure.comap (Subtype.val : Val τ → TExpr τ) (nstep n e)) n
+
+/-- Scalar finite approximants unfold through one small step. -/
+theorem linExpectedAt_succ {τ : Ty} (K : Val τ → ℝ≥0∞)
+    (n : ℕ) (e : TExpr τ) :
+    linExpectedAt (n + 1) e K =
+      ∫⁻ e', linExpectedAt n e' K ∂(step e) := by
+  let Kt : TExpr τ → ℝ≥0∞ :=
+    fun x => if h : isValue x = true then K ⟨x, h⟩ else 0
+  have hKt : ∀ v : Val τ, Kt (v : TExpr τ) = K v := by
+    intro v
+    rcases v with ⟨x, hx⟩
+    change isValue x = true at hx
+    dsimp [Kt]
+    rw [dif_pos hx]
+  unfold linExpectedAt valueDistAt
+  rw [nstep_succ_bind e n]
+  calc
+    (∫⁻ v : Val τ, K v ∂Measure.comap
+        (Subtype.val : Val τ → TExpr τ)
+        (Measure.bind (step e) fun e' => nstep n e'))
+        =
+      ∫⁻ v : Val τ, Kt (v : TExpr τ) ∂Measure.comap
+        (Subtype.val : Val τ → TExpr τ)
+        (Measure.bind (step e) fun e' => nstep n e') := by
+          exact lintegral_congr_ae
+            (Filter.Eventually.of_forall fun v => (hKt v).symm)
+    _ = ∫⁻ x in Val τ, Kt x
+          ∂(Measure.bind (step e) fun e' => nstep n e') := by
+          exact lintegral_subtype_comap
+            (show MeasurableSet (Val τ) by trivial) Kt
+    _ = ∫⁻ e', ∫⁻ x in Val τ, Kt x ∂(nstep n e') ∂(step e) := by
+          rw [← lintegral_indicator
+            (show MeasurableSet (Val τ) by trivial) Kt]
+          conv_rhs =>
+            enter [2, e']
+            rw [← lintegral_indicator
+              (show MeasurableSet (Val τ) by trivial) Kt]
+          rw [Measure.lintegral_bind]
+          · exact (measurable_from_texpr
+              (fun e' : TExpr τ => nstep n e')).aemeasurable
+          · exact (measurable_from_texpr
+              ((Val τ).indicator Kt)).aemeasurable
+    _ = ∫⁻ e', ∫⁻ v : Val τ, Kt (v : TExpr τ)
+          ∂Measure.comap (Subtype.val : Val τ → TExpr τ) (nstep n e')
+          ∂(step e) := by
+          congr
+          funext e'
+          exact (lintegral_subtype_comap
+            (show MeasurableSet (Val τ) by trivial) Kt).symm
+    _ = ∫⁻ e', ∫⁻ v : Val τ, K v
+          ∂Measure.comap (Subtype.val : Val τ → TExpr τ) (nstep n e')
+          ∂(step e) := by
+          apply lintegral_congr_ae
+          filter_upwards with e'
+          exact lintegral_congr_ae
+            (Filter.Eventually.of_forall fun v => hKt v)
+
+/-- The big-step scalar expectation is the supremum of scalar finite
+approximants. -/
+theorem linExpected_sem_eq_iSup {τ : Ty} (e : TExpr τ)
+    (K : Val τ → ℝ≥0∞) :
+    (∫⁻ v, K v ∂(sem e)) =
+      ⨆ n, linExpectedAt n e K := by
+  unfold sem linExpectedAt valueDistAt
+  exact lintegral_iSup_measure_of_monotone
+    (fun n : ℕ =>
+      Measure.comap (Subtype.val : Val τ → TExpr τ) (nstep n e))
+    (value_approximants_mono e)
+    (measurable_from_val K)
+
+/-- Big-step semantics is invariant under adding one small-step in front.
+
+This is the Markov/unfolding property of the `iSup`-defined big-step
+semantics. Intuitively:
+
+  sem e = step e >>= sem
+
+because `sem e` collects all finite numbers of steps to values.
+-/
+theorem sem_step_unfold {τ : Ty} (e : TExpr τ) :
+    sem e = Dist.bind (step e) (fun e' => sem e') := by
+  ext A hA
+  unfold sem Dist.bind
+  rw [measure_iSup_apply_of_monotone
+    (fun n : ℕ =>
+      Measure.comap (Subtype.val : Val τ → TExpr τ) (nstep n e))
+    (value_approximants_mono e) hA]
+
+  have hshift :
+      (⨆ n : ℕ,
+        (Measure.comap (Subtype.val : Val τ → TExpr τ) (nstep n e)) A)
+        =
+      (⨆ n : ℕ,
+        (Measure.comap (Subtype.val : Val τ → TExpr τ)
+          (nstep (n + 1) e)) A) := by
+    apply le_antisymm
+    · exact iSup_le fun n =>
+        le_iSup_of_le n (nstep_value_succ_le e hA n)
+    · exact iSup_le fun n =>
+        le_iSup_of_le (n + 1) le_rfl
+  rw [hshift]
+  simp_rw [nstep_succ_bind e]
+  simp_rw [Measure.comap_apply (Subtype.val : Val τ → TExpr τ)
+    Subtype.val_injective (fun _ _ => by trivial) _ hA]
+
+  rw [Measure.bind_apply hA]
+  · simp_rw [measure_iSup_apply_of_monotone
+      (fun n : ℕ =>
+        Measure.comap (Subtype.val : Val τ → TExpr τ) (nstep n _))
+      (value_approximants_mono _) hA]
+    rw [lintegral_iSup
+      (fun n => measurable_from_texpr
+        (fun e' : TExpr τ =>
+          (Measure.comap (Subtype.val : Val τ → TExpr τ)
+            (nstep n e')) A))
+      (by
+        intro n m hnm e'
+        exact value_approximants_mono e' hnm A)]
+    congr
+    funext n
+    rw [Measure.bind_apply
+      (by trivial :
+        MeasurableSet ((Subtype.val : Val τ → TExpr τ) '' A))]
+    · simp_rw [Measure.comap_apply (Subtype.val : Val τ → TExpr τ)
+        Subtype.val_injective (fun _ _ => by trivial) _ hA]
+    · exact (measurable_from_texpr
+        (fun e' : TExpr τ => nstep n e')).aemeasurable
+  · exact (measurable_from_texpr
+      (fun e' : TExpr τ =>
+        ⨆ n, Measure.comap (Subtype.val : Val τ → TExpr τ)
+          (nstep n e'))).aemeasurable
+
+/-- Evaluation-context compatibility for a unary context.
+
+If stepping `C e` while `e` is not yet a value is the same as stepping `e`
+and rebuilding the context, and the context cannot become a value before the
+hole does, then big-step semantics factors through the big-step semantics of
+`e`.
+-/
+theorem sem_eval_context
+    {τ σ : Ty}
+    (C : TExpr τ → TExpr σ)
+    (hvalue :
+      ∀ e : TExpr τ,
+        isValue (C e) = true →
+          isValue e = true)
+    (hstep :
+      ∀ e : TExpr τ,
+        isValue e = false →
+          step (C e) =
+            Dist.bind (step e) fun e' =>
+              Dist.ret (C e'))
+    (e : TExpr τ) :
+    sem (C e) =
+      Dist.bind (sem e) fun v =>
+        sem (C (v : TExpr τ)) := by
+  ext A hA
+  let K : Val τ → ℝ≥0∞ :=
+    fun v => sem (C (v : TExpr τ)) A
+  let R : TExpr τ → ℝ≥0∞ :=
+    fun e => ∫⁻ v, K v ∂(sem e)
+  let S : TExpr τ → ℝ≥0∞ :=
+    fun e => sem (C e) A
+
+  have hR_value : ∀ v : Val τ, R (v : TExpr τ) = S (v : TExpr τ) := by
+    intro v
+    simp [R, K, S, sem_value v, Dist.ret]
+
+  have hR_step : ∀ e : TExpr τ,
+      R e = ∫⁻ e', R e' ∂(step e) := by
+    intro e
+    unfold R
+    rw [sem_step_unfold e]
+    unfold Dist.bind
+    rw [Measure.lintegral_bind]
+    · exact (measurable_from_texpr
+        (fun e' : TExpr τ => sem e')).aemeasurable
+    · exact (measurable_from_val K).aemeasurable
+
+  have hS_step : ∀ e : TExpr τ, isValue e = false →
+      S e = ∫⁻ e', S e' ∂(step e) := by
+    intro e hnon
+    unfold S
+    have hbind :
+        Dist.bind (step (C e)) (fun t => sem t) =
+          Dist.bind (step e) (fun e' => sem (C e')) := by
+      rw [hstep e hnon]
+      unfold Dist.bind Dist.ret
+      rw [Measure.bind_bind
+        ((measurable_from_texpr
+          (fun e' : TExpr τ => Measure.dirac (C e'))).aemeasurable)
+        ((measurable_from_texpr
+          (fun t : TExpr σ => sem t)).aemeasurable)]
+      apply Measure.bind_congr_right
+      filter_upwards with e'
+      rw [Measure.dirac_bind]
+      exact measurable_from_texpr (fun t : TExpr σ => sem t)
+    calc
+      sem (C e) A
+          = (Dist.bind (step (C e)) (fun t => sem t)) A := by
+              rw [sem_step_unfold (C e)]
+      _ = (Dist.bind (step e) (fun e' => sem (C e'))) A := by
+              rw [hbind]
+      _ = ∫⁻ e', sem (C e') A ∂(step e) := by
+              change (Measure.bind (step e) (fun e' => sem (C e'))) A =
+                ∫⁻ e', sem (C e') A ∂(step e)
+              rw [Measure.bind_apply hA]
+              exact (measurable_from_texpr
+                (fun e' : TExpr τ => sem (C e'))).aemeasurable
+
+  have hlin_zero_nonvalue : ∀ {e : TExpr τ},
+      isValue e = false → linExpectedAt 0 e K = 0 := by
+    intro e hnon
+    unfold linExpectedAt
+    rw [valueDistAt_zero_nonvalue hnon]
+    simp
+
+  have hlin_zero_value : ∀ v : Val τ,
+      linExpectedAt 0 (v : TExpr τ) K = R (v : TExpr τ) := by
+    intro v
+    unfold linExpectedAt R
+    rw [valueDistAt_zero_value v, sem_value v]
+
+  have hR_le_S : ∀ e : TExpr τ, R e ≤ S e := by
+    intro e
+    rw [show R e = ⨆ n, linExpectedAt n e K by
+      unfold R
+      exact linExpected_sem_eq_iSup e K]
+    apply iSup_le
+    intro n
+    induction n generalizing e with
+    | zero =>
+        by_cases hv : isValue e = true
+        · let v : Val τ := ⟨e, hv⟩
+          calc
+            linExpectedAt 0 e K = R (v : TExpr τ) := by
+              change linExpectedAt 0 (v : TExpr τ) K = R (v : TExpr τ)
+              exact hlin_zero_value v
+            _ = S (v : TExpr τ) := hR_value v
+            _ ≤ S e := le_rfl
+        · have hfalse : isValue e = false := by
+            exact Bool.eq_false_iff.mpr hv
+          rw [hlin_zero_nonvalue hfalse]
+          exact zero_le _
+    | succ n ih =>
+        rw [linExpectedAt_succ K n e]
+        calc
+          (∫⁻ e', linExpectedAt n e' K ∂(step e))
+              ≤ ∫⁻ e', S e' ∂(step e) := by
+                  exact lintegral_mono fun e' => ih e'
+          _ ≤ S e := by
+            by_cases hv : isValue e = true
+            · let v : Val τ := ⟨e, hv⟩
+              rw [show step e = Dist.ret e by
+                change step (v : TExpr τ) = Dist.ret (v : TExpr τ)
+                exact step_value v]
+              simp [Dist.ret]
+            · have hfalse : isValue e = false := by
+                exact Bool.eq_false_iff.mpr hv
+              rw [← hS_step e hfalse]
+
+  have hcontext_succ : ∀ (n : ℕ) (e : TExpr τ),
+      isValue e = false →
+        valueDistAt (n + 1) (C e) A =
+          ∫⁻ e', valueDistAt n (C e') A ∂(step e) := by
+    intro n e hnon
+    unfold valueDistAt
+    rw [nstep_succ_bind (C e) n]
+    rw [hstep e hnon]
+    rw [Measure.comap_apply (Subtype.val : Val σ → TExpr σ)
+      Subtype.val_injective (fun _ _ => by trivial) _ hA]
+    unfold Dist.bind Dist.ret
+    rw [Measure.bind_bind
+      ((measurable_from_texpr
+        (fun e' : TExpr τ => Measure.dirac (C e'))).aemeasurable)
+      ((measurable_from_texpr
+        (fun t : TExpr σ => nstep n t)).aemeasurable)]
+    rw [Measure.bind_apply
+      (by trivial :
+        MeasurableSet ((Subtype.val : Val σ → TExpr σ) '' A))]
+    · congr
+      funext e'
+      rw [Measure.dirac_bind]
+      · rw [Measure.comap_apply (Subtype.val : Val σ → TExpr σ)
+          Subtype.val_injective (fun _ _ => by trivial) _ hA]
+      · exact measurable_from_texpr (fun t : TExpr σ => nstep n t)
+    · exact (measurable_from_texpr
+        (fun e' : TExpr τ => Measure.bind (Measure.dirac (C e'))
+          (fun t : TExpr σ => nstep n t))).aemeasurable
+
+  have hS_le_R : ∀ e : TExpr τ, S e ≤ R e := by
+    intro e
+    unfold S
+    rw [show sem (C e) A =
+        ⨆ n, valueDistAt n (C e) A by
+      unfold sem valueDistAt
+      exact measure_iSup_apply_of_monotone
+        (fun n : ℕ =>
+          Measure.comap (Subtype.val : Val σ → TExpr σ) (nstep n (C e)))
+        (value_approximants_mono (C e)) hA]
+    apply iSup_le
+    intro n
+    induction n generalizing e with
+    | zero =>
+        by_cases hCv : isValue (C e) = true
+        · have he : isValue e = true := hvalue e hCv
+          let v : Val τ := ⟨e, he⟩
+          calc
+            valueDistAt 0 (C e) A
+                ≤ sem (C e) A := valueDistAt_le_sem 0 (C e) A
+            _ = S (v : TExpr τ) := rfl
+            _ = R (v : TExpr τ) := (hR_value v).symm
+            _ = R e := rfl
+        · have hfalse : isValue (C e) = false := by
+            exact Bool.eq_false_iff.mpr hCv
+          rw [valueDistAt_zero_nonvalue hfalse]
+          exact zero_le _
+    | succ n ih =>
+        by_cases hv : isValue e = true
+        · let v : Val τ := ⟨e, hv⟩
+          calc
+            valueDistAt (n + 1) (C e) A
+                ≤ sem (C e) A :=
+                  valueDistAt_le_sem (n + 1) (C e) A
+            _ = S (v : TExpr τ) := rfl
+            _ = R (v : TExpr τ) := (hR_value v).symm
+            _ = R e := rfl
+        · have hfalse : isValue e = false := by
+            exact Bool.eq_false_iff.mpr hv
+          rw [hcontext_succ n e hfalse]
+          calc
+            (∫⁻ e', valueDistAt n (C e') A ∂(step e))
+                ≤ ∫⁻ e', R e' ∂(step e) := by
+                    exact lintegral_mono fun e' => ih e'
+            _ = R e := (hR_step e).symm
+
+  calc
+    sem (C e) A = S e := rfl
+    _ = R e := le_antisymm (hS_le_R e) (hR_le_S e)
+    _ = (Dist.bind (sem e) fun v => sem (C (v : TExpr τ))) A := by
+      unfold R K Dist.bind
+      rw [Measure.bind_apply hA]
+      exact (measurable_from_val
+        (fun v : Val τ => sem (C (v : TExpr τ)))).aemeasurable
+
 /-- Big-step decomposition for evaluating the left operand of `<`. -/
 theorem sem_lt_left
     (e1 e2 : TExpr (.float .G)) :
@@ -286,11 +760,26 @@ theorem sem_lt_left
       =
     Dist.bind (sem e1) fun v1 =>
       sem (.lt (v1 : TExpr (.float .G)) e2 (ModeLE.refl .G) (ModeLE.refl .G)) := by
-  /-
-  This is the finite-approximant/iSup step: the total fuel used by
-  `lt e1 e2` splits into fuel for `e1` and then fuel for the continuation.
-  -/
-  sorry
+  let C : TExpr (.float .G) → TExpr .bool :=
+    fun e1' => .lt e1' e2 (ModeLE.refl .G) (ModeLE.refl .G)
+
+  change sem (C e1) =
+      Dist.bind (sem e1) fun v1 =>
+        sem (C (v1 : TExpr (.float .G)))
+
+  apply sem_eval_context C
+  · intro e hval
+    simp [C, isValue, boolValue?] at hval
+  · intro e hnonval
+    unfold C
+    cases h : floatValue? e with
+    | some v =>
+        have hv : isValue e = true := by
+          cases e <;> simp [floatValue?, isValue] at h ⊢
+        rw [hv] at hnonval
+        contradiction
+    | none =>
+        simp [step, h]
 
 /-- Big-step decomposition for evaluating the right operand of `<` once the
 left operand is already a value. -/
@@ -304,12 +793,60 @@ theorem sem_lt_right
         Dist.ret trueVal
       else
         Dist.ret falseVal := by
-  /-
-  This is the second finite-approximant/iSup step: with the left value fixed,
-  the remaining fuel is exactly the fuel for `e2`, followed by one comparison
-  step.
-  -/
-  sorry
+  let C : TExpr (.float .G) → TExpr .bool :=
+    fun e2' => .lt (v1 : TExpr (.float .G)) e2'
+      (ModeLE.refl .G) (ModeLE.refl .G)
+
+  have hctx :
+      sem (C e2) =
+        Dist.bind (sem e2) fun v2 =>
+          sem (C (v2 : TExpr (.float .G))) := by
+    apply sem_eval_context C
+    · intro e hval
+      simp [C, isValue, boolValue?] at hval
+    · intro e hnonval
+      unfold C
+
+      rcases v1 with ⟨v1e, hv1⟩
+      cases v1e <;>
+        simp [Val, isValue, floatValue?] at hv1
+
+      cases h : floatValue? e with
+      | some v =>
+          have hv : isValue e = true := by
+            cases e <;> simp [floatValue?, isValue] at h ⊢
+          rw [hv] at hnonval
+          contradiction
+      | none =>
+          cases e <;> simp [floatValue?, step, Dist.bind, Dist.ret] at h ⊢
+
+  rw [hctx]
+  apply Measure.bind_congr_right
+  filter_upwards with v2
+
+  have hstep_values :
+      step (C (v2 : TExpr (.float .G))) =
+        if floatVal v1 < floatVal v2 then
+          Dist.ret (.trueE)
+        else
+          Dist.ret (.falseE) := by
+    rcases v1 with ⟨v1e, hv1⟩
+    rcases v2 with ⟨v2e, hv2⟩
+    cases v1e <;> simp [Val, isValue, floatValue?] at hv1
+    cases v2e <;>
+      simp [Val, isValue, floatValue?, C, step, floatVal, Dist.ret] at hv2 ⊢
+
+  rw [sem_step_unfold]
+  rw [hstep_values]
+  by_cases hlt : floatVal v1 < floatVal v2
+  · simp [hlt, Dist.ret]
+    rw [Measure.dirac_bind
+      (measurable_from_texpr (fun e' : TExpr .bool => sem e'))]
+    exact sem_value trueVal
+  · simp [hlt, Dist.ret]
+    rw [Measure.dirac_bind
+      (measurable_from_texpr (fun e' : TExpr .bool => sem e'))]
+    exact sem_value falseVal
 
 /-- Big-step/continuation form of the semantics of `<`.
 
