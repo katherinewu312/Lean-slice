@@ -41,9 +41,7 @@ noncomputable def expectedFloatDist {m : Mode} (μ : Dist (Val (.float m))) : �
 /-- Semantic equivalence of distributions at a type.
 
 At `Float E`, only the expected float observation is compared. At `Float G`,
-`Bool`, and `Unit`, the whole value distribution is compared. Product types are
-not present in the current `Ty` language; when they are added, their case should
-compare the projected distributions structurally. -/
+`Bool`, `Unit`, and pair types, the whole value distribution is compared. -/
 noncomputable def ExpectedEquiv : (τ : Ty) → Dist (Val τ) → Dist (Val τ) → Prop
   | .float .E, μ, ν =>
       expectedFloatDist μ = expectedFloatDist ν
@@ -52,6 +50,8 @@ noncomputable def ExpectedEquiv : (τ : Ty) → Dist (Val τ) → Dist (Val τ) 
   | .bool, μ, ν =>
       μ = ν
   | .unit, μ, ν =>
+      μ = ν
+  | .pair _ _, μ, ν =>
       μ = ν
 
 notation "Eqv[" τ "](" μ ", " ν ")" => ExpectedEquiv τ μ ν
@@ -96,6 +96,8 @@ theorem expectedEquiv_refl {τ : Ty} (μ : Dist (Val τ)) :
       rfl
   | bool =>
       rfl
+  | pair τ1 τ2 =>
+      rfl
   | float m =>
       cases m <;> rfl
 
@@ -108,6 +110,8 @@ theorem expectedEquiv_symm {τ : Ty} {μ ν : Dist (Val τ)}
       exact h.symm
   | bool =>
       exact h.symm
+  | pair τ1 τ2 =>
+      exact h.symm
   | float m =>
       cases m <;> exact h.symm
 
@@ -119,6 +123,8 @@ theorem expectedEquiv_trans {τ : Ty} {μ ν ξ : Dist (Val τ)}
   | unit =>
       exact hμν.trans hνξ
   | bool =>
+      exact hμν.trans hνξ
+  | pair τ1 τ2 =>
       exact hμν.trans hνξ
   | float m =>
       cases m <;> exact hμν.trans hνξ
@@ -207,9 +213,7 @@ theorem comap_dirac_value {τ : Ty} (v : Val τ) :
 /-- Values are absorbing for the small-step semantics. -/
 theorem step_value {τ : Ty} (v : Val τ) :
     step (v : TExpr τ) = Dist.ret (v : TExpr τ) := by
-  rcases v with ⟨t, hv⟩
-  cases τ <;> cases t <;>
-    simp [Val, isValue, unitValue?, boolValue?, floatValue?, step] at hv ⊢
+  exact step_of_isValue v.property
 
 /-- Any finite-step approximation of a value is the same value. -/
 theorem nstep_value {τ : Ty} (v : Val τ) (n : ℕ) :
@@ -975,6 +979,10 @@ theorem det_sound_cps {τ : Ty} (e : TExpr τ) :
   | falseE =>
       intro K hK
       simp [det]
+
+  | pair e1 e2 ih1 ih2 =>
+      intro K hK
+      sorry
 
   | letE x e1 e2 ih1 ih2 =>
       intro K hK

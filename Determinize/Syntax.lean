@@ -13,6 +13,7 @@ inductive Ty where
   | unit : Ty
   | bool : Ty
   | float : Mode → Ty
+  | pair : Ty → Ty → Ty
 deriving DecidableEq, Repr
 
 /-- Mode preorder (`G ≼ E`, and reflexive). -/
@@ -35,6 +36,8 @@ lemma modeLe_trans {m1 m2 m3 : Mode} (h12 : m1 ≼ m2) (h23 : m2 ≼ m3) : m1 �
 inductive Sub : Ty → Ty → Type where
   | unit : Sub .unit .unit
   | bool : Sub .bool .bool
+  | pair {τ1 τ2 : Ty} :
+      Sub (.pair τ1 τ2) (.pair τ1 τ2)
   | float {m1 m2 : Mode} :
       m1 ≼ m2 →
       Sub (.float m1) (.float m2)
@@ -48,6 +51,7 @@ inductive TExpr : Ty → Type where
   | const {m : Mode} (c : ℝ) : TExpr (.float m)
   | trueE : TExpr .bool
   | falseE : TExpr .bool
+  | pair {τ1 τ2 : Ty} (e1 : TExpr τ1) (e2 : TExpr τ2) : TExpr (.pair τ1 τ2)
   | letE {τ1 τ2 : Ty} (x : String) (e1 : TExpr τ1) (e2 : TExpr τ2) : TExpr τ2
   | lt {m1 m2 : Mode}
       (e1 : TExpr (.float m1)) (e2 : TExpr (.float m2)) :
@@ -109,6 +113,8 @@ def subst {σ τ : Ty} (x : String) (v : TExpr σ) : TExpr τ → TExpr τ
       .trueE
   | .falseE =>
       .falseE
+  | .pair e1 e2 =>
+      .pair (subst x v e1) (subst x v e2)
   | .letE y e1 e2 =>
       if x = y then
         .letE y (subst x v e1) e2
@@ -174,6 +180,10 @@ def isValue : {τ : Ty} → TExpr τ → Bool
       (boolValue? e).isSome
   | .float _, e =>
       (floatValue? e).isSome
+  | .pair _ _, .pair e1 e2 =>
+      isValue e1 && isValue e2
+  | .pair _ _, _ =>
+      false
 
 end TExpr
 

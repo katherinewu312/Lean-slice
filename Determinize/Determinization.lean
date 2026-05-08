@@ -35,6 +35,8 @@ def det : {τ : Ty} → TExpr τ → TExpr τ
       .trueE
   | _, .falseE =>
       .falseE
+  | _, .pair e1 e2 =>
+      .pair (det e1) (det e2)
   | _, .letE x e1 e2 =>
       .letE x (det e1) (det e2)
   | _, .lt e1 e2 h1 h2 =>

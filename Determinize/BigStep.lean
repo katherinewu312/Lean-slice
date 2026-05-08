@@ -42,10 +42,8 @@ lemma nstep_value_succ_le {τ : Ty} (e : TExpr τ) {A : Set (Val τ)}
     refine lintegral_mono fun e' => ?_
     by_cases he' : e' ∈ (Subtype.val : Val τ → TExpr τ) '' A
     · rcases he' with ⟨v, _hvA, rfl⟩
-      have hstep : step (v : TExpr τ) = Dist.ret (v : TExpr τ) := by
-        rcases v with ⟨t, hv⟩
-        cases τ <;> cases t <;>
-          simp [Val, isValue, unitValue?, boolValue?, floatValue?, step] at hv ⊢
+      have hstep : step (v : TExpr τ) = Dist.ret (v : TExpr τ) :=
+        step_of_isValue v.property
       rw [hstep]
       simp [Measure.dirac_apply' _ (by trivial : MeasurableSet ((Subtype.val : Val τ → TExpr τ) '' A)),
         _hvA]

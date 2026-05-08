@@ -21,6 +21,8 @@ def subsumedValue? {τ1 τ2 : Ty} (e : TExpr τ1) (h : τ1 <: τ2) : Option (TEx
       | some true => some .trueE
       | some false => some .falseE
       | none => none
+  | .pair =>
+      if isValue e = true then some e else none
   | .float (m2 := m2) _ =>
       match floatValue? e with
       | some v => some (.const (m := m2) v)
@@ -38,6 +40,14 @@ noncomputable def step : {τ : Ty} → TExpr τ → Dist (TExpr τ)
       Dist.ret .trueE
   | _, .falseE =>
       Dist.ret .falseE
+  | _, .pair e1 e2 =>
+      if isValue e1 then
+        if isValue e2 then
+          Dist.ret (.pair e1 e2)
+        else
+          Dist.bind (step e2) (fun g => Dist.ret (.pair e1 g))
+      else
+        Dist.bind (step e1) (fun g => Dist.ret (.pair g e2))
   | _, .letE x e1 e2 =>
       if isValue e1 then
         Dist.ret (subst x e1 e2)
@@ -143,6 +153,16 @@ noncomputable def step : {τ : Ty} → TExpr τ → Dist (TExpr τ)
       match subsumedValue? e h with
       | some v => Dist.ret v
       | none => Dist.bind (step e) (fun g => Dist.ret (.subsume g h))
+
+/-- Values are absorbing for one small step. -/
+theorem step_of_isValue {τ : Ty} {e : TExpr τ}
+    (h : isValue e = true) :
+    step e = Dist.ret e := by
+  cases τ <;> cases e <;>
+    simp [isValue, unitValue?, boolValue?, floatValue?, step] at h ⊢
+  case pair.pair =>
+    rcases h with ⟨h1, h2⟩
+    simp [h1, h2]
 
 /-- Examples. -/
 example :

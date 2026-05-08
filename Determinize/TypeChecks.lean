@@ -66,6 +66,12 @@ example : TExpr (.float .E) :=
     (.const (m := .E) (0 : ℝ))
     (.const (m := .E) (1 : ℝ))
 
+-- pairs
+example : TExpr (.pair (.float .G) .bool) :=
+  .pair
+    (.const (m := .G) (3 : ℝ))
+    .trueE
+
 -- let
 example : TExpr (.float .E) :=
   .letE
