@@ -118,12 +118,16 @@ structure SymSample where
   name : String
   random : SRandom .E
 
-structure SymState (τ : Ty) where
-  sigma : List SymSample
-  residual : TExpr τ
-
+/-- This gives the local result of stepping inside one expression.
+It only carries the new samples produced by this one step, not the whole existing environment. -/
 structure SymOut (τ : Ty) where
   samples : List SymSample
+  residual : TExpr τ
+
+/-- This represents the actual state of the symbolic semantics.
+In other words, SymState.sigma is all symbolic samples accumulated so far. -/
+structure SymState (τ : Ty) where
+  sigma : List SymSample
   residual : TExpr τ
 
 instance : MeasurableSpace SymSample := ⊤
@@ -196,8 +200,7 @@ noncomputable def finishFloat {m : Mode} (next : Nat)
       Dist.bind r.sample (fun e => Dist.ret (SymOut.ret e))
 
 /-- One symbolic step inside an expression. Expectation-mode samples are
-recorded; general-mode samples are sampled immediately.
-expression → new samples + new expression. -/
+recorded; general-mode samples are sampled immediately. -/
 noncomputable def symbolicStepExpr (next : Nat) : {τ : Ty} → TExpr τ → Dist (SymOut τ)
   | _, .var x =>
       Dist.ret (SymOut.ret (.var x))
@@ -352,7 +355,7 @@ noncomputable def symbolicStepExpr (next : Nat) : {τ : Ty} → TExpr τ → Dis
             mapOut (symbolicStepExpr next e) (fun g => .subsume g h)
 
 /-- One symbolic step on a state `<sigma || residual>`.
-In other words, existing sigma + expression → updated sigma + updated expression. -/
+That is, run the local expression step symbolicStepExpr, then append out.samples onto the existing st.sigma. -/
 noncomputable def symbolicStep {τ : Ty} (st : SymState τ) : Dist (SymState τ) :=
   Dist.bind (symbolicStepExpr st.sigma.length st.residual) fun out =>
     Dist.ret { sigma := st.sigma ++ out.samples, residual := out.residual }
@@ -375,6 +378,80 @@ inductive SymbolicStep {τ : Ty} : SymState τ → Dist (SymState τ) → Prop w
 lemma symbolic_step_well_defined {τ : Ty} (st : SymState τ) :
     ∃ μ : Dist (SymState τ), SymbolicStep st μ := by
   exact ⟨symbolicStep st, SymbolicStep.eval st⟩
+
+/-- A value state is unchanged by one symbolic step. -/
+example :
+    symbolicStep (symbolicInitial (.const (m := .E) (3 : ℝ))) =
+      Dist.ret
+        ({ sigma := [], residual := .const (m := .E) (3 : ℝ) } :
+          SymState (.float .E)) :=
+  by
+    simp [symbolicStep, symbolicInitial, symbolicStepExpr, SymOut.ret, Dist.ret,
+      Dist.bind]
+    rw [Measure.dirac_bind (by fun_prop)]
+
+/-- An expectation-mode sample is recorded in `sigma` and replaced by a name. -/
+example :
+    symbolicStep
+        (symbolicInitial
+          (.uniform
+            (m := .E)
+            (.const (m := .E) (0 : ℝ))
+            (.const (m := .E) (1 : ℝ))
+            (ModeLE.refl .E)
+            (ModeLE.refl .E))) =
+      Dist.ret
+        ({ sigma :=
+            [{ name := freshName 0,
+               random :=
+                .uniform
+                  (.const (m := .E) (0 : ℝ))
+                  (.const (m := .E) (1 : ℝ))
+                  (ModeLE.refl .E)
+                  (ModeLE.refl .E) }],
+           residual := .var (freshName 0) } :
+          SymState (.float .E)) :=
+  by
+    simp [symbolicStep, symbolicInitial, symbolicStepExpr, finishFloat,
+      Dist.ret, Dist.bind, isSymValue, isSymFloat]
+    rw [Measure.dirac_bind (by fun_prop)]
+
+/-- Existing symbolic samples are preserved; the next sample is appended. -/
+example :
+    let u0 : SymSample :=
+      { name := freshName 0,
+        random :=
+          (.uniform
+            (.const (m := .E) (0 : ℝ))
+            (.const (m := .E) (1 : ℝ))
+            (ModeLE.refl .E)
+            (ModeLE.refl .E)) }
+    symbolicStep
+        ({ sigma := [u0],
+           residual :=
+            .uniform
+              (m := .E)
+              (.var "u0")
+              (.const (m := .E) (2 : ℝ))
+              (ModeLE.refl .E)
+              (ModeLE.refl .E) } :
+          SymState (.float .E)) =
+      Dist.ret
+        ({ sigma :=
+            [u0,
+             { name := freshName 1,
+               random :=
+                .uniform
+                  (.var "u0")
+                  (.const (m := .E) (2 : ℝ))
+                  (ModeLE.refl .E)
+                  (ModeLE.refl .E) }],
+           residual := .var (freshName 1) } :
+          SymState (.float .E)) :=
+  by
+    simp [symbolicStep, symbolicStepExpr, finishFloat,
+      Dist.ret, Dist.bind, isSymValue, isSymFloat]
+    rw [Measure.dirac_bind (by fun_prop)]
 
 end TExpr
 
