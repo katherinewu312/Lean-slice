@@ -144,8 +144,78 @@ def map {σ τ : Ty} (f : TExpr σ → TExpr τ) (o : SymOut σ) : SymOut τ :=
 
 end SymOut
 
+def substRandom (x : String) (v : TExpr (.float .E)) :
+    {m : Mode} → SRandom m → SRandom m
+  | _, .uniform e1 e2 h1 h2 =>
+      .uniform (subst x v e1) (subst x v e2) h1 h2
+  | _, .gaussian e1 e2 h1 h2 =>
+      .gaussian (subst x v e1) (subst x v e2) h1 h2
+  | _, .poisson e h =>
+      .poisson (subst x v e) h
+  | _, .exponential e h =>
+      .exponential (subst x v e) h
+  | _, .beta e1 e2 h1 h2 =>
+      .beta (subst x v e1) (subst x v e2) h1 h2
+  | _, .gamma e1 e2 h1 h2 =>
+      .gamma (subst x v e1) (subst x v e2) h1 h2
+
+namespace SymSample
+
+def subst (x : String) (v : TExpr (.float .E)) (sample : SymSample) : SymSample :=
+  { sample with random := substRandom x v sample.random }
+
+end SymSample
+
 def freshName (next : Nat) : String :=
   "u" ++ toString next
+
+/-- Sample the symbolic environment and substitute each sampled value through
+the remaining environment and residual expression. -/
+noncomputable def actualWithSigma {τ : Ty} :
+    List SymSample → TExpr τ → Dist (TExpr τ)
+  | [], residual =>
+      Dist.ret residual
+  | sample :: rest, residual =>
+      Dist.bind sample.random.sample fun v =>
+        actualWithSigma
+          (rest.map (SymSample.subst sample.name v))
+          (subst sample.name v residual)
+termination_by sigma _ => sigma.length
+decreasing_by simp
+
+/-- Actual interpretation of one symbolic state: sample the LHS of `||` and
+plug the results into the RHS. -/
+noncomputable def actualState {τ : Ty} (st : SymState τ) : Dist (TExpr τ) :=
+  actualWithSigma st.sigma st.residual
+
+/-- Actual interpretation of a symbolic semantics, such as `symbolicStep st`.
+This returns an ordinary expression distribution. -/
+noncomputable def actual {τ : Ty} (μ : Dist (SymState τ)) : Dist (TExpr τ) :=
+  Dist.bind μ actualState
+
+/-- Replace the symbolic environment by expectations, then determinize the
+residual expression. -/
+noncomputable def expectedWithSigma {τ : Ty} :
+    List SymSample → TExpr τ → Dist (TExpr τ)
+  | [], residual =>
+      Dist.ret (det residual)
+  | sample :: rest, residual =>
+      let mean := sample.random.mean
+      expectedWithSigma
+        (rest.map (SymSample.subst sample.name mean))
+        (subst sample.name mean residual)
+termination_by sigma _ => sigma.length
+decreasing_by simp
+
+/-- Expected interpretation of one symbolic state: replace each LHS symbolic
+sample by its expectation and determinize the RHS. -/
+noncomputable def expectedState {τ : Ty} (st : SymState τ) : Dist (TExpr τ) :=
+  expectedWithSigma st.sigma st.residual
+
+/-- Expected interpretation of a symbolic semantics, such as `symbolicStep st`.
+This returns an ordinary expression distribution for the determinized program. -/
+noncomputable def expected {τ : Ty} (μ : Dist (SymState τ)) : Dist (TExpr τ) :=
+  Dist.bind μ expectedState
 
 /-- Symbolic float values: constants, symbolic variables, and arithmetic over them. -/
 def isSymFloat : {m : Mode} → TExpr (.float m) → Bool
