@@ -53,17 +53,11 @@ theorem actual_symbolicNstep_succ {τ : Ty} (n : ℕ) (e : TExpr τ) :
 ordinary `n`-step semantics.
 
 Proof structure:
-* Base case: interpreting zero symbolic steps gives `return e`, matching
-  `nstep 0 e`.
-* Successor case: use `actual_symbolicNstep_succ` to rewrite the actual
-  interpretation of `n + 1` symbolic steps as one ordinary step after the
-  actual interpretation of `n` symbolic steps, then apply the induction
-  hypothesis and unfold `nstep`.
 
-Base:
+Base case:
 actual(symstep_0(e)) = step_0(e)
 
-Step:
+Inductive step:
 assuming actual(symstep_n(e)) = step_n(e) by the inductive step,
 actual(symstep_{n+1}(e))
 = actual(symstep_n(e)) >>= step (by the above lemma)

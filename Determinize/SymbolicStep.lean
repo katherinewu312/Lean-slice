@@ -122,6 +122,7 @@ structure SymSample where
 has taken one symbolic deterministic step, even when it is nested. -/
 inductive SymExpr : Ty → Type where
   | expr {τ : Ty} : TExpr τ → SymExpr τ
+  | sym : String → SymExpr (.float .E)
   | value {τ : Ty} : SymExpr τ → SymExpr τ
   | pair {τ1 τ2 : Ty} : SymExpr τ1 → SymExpr τ2 → SymExpr (.pair τ1 τ2)
   | letE {τ1 τ2 : Ty} : String → SymExpr τ1 → SymExpr τ2 → SymExpr τ2
@@ -164,6 +165,8 @@ namespace SymExpr
 def erase : {τ : Ty} → SymExpr τ → TExpr τ
   | _, .expr e =>
       e
+  | _, .sym x =>
+      .var x
   | _, .value e =>
       erase e
   | _, .pair e1 e2 =>
@@ -244,7 +247,13 @@ def ofTExpr : {τ : Ty} → TExpr τ → SymExpr τ
   | _, .subsume e h =>
       .subsume (ofTExpr e) h
 
-def subst {σ τ : Ty} (x : String) (v : SymExpr σ) : SymExpr τ → SymExpr τ
+/-- Source-variable substitution.
+
+This is used for source `letE`.
+It replaces source variables `.expr (.var x)`, but it does not replace
+symbolic atoms `.sym x`.
+-/
+def substVar {σ τ : Ty} (x : String) (v : SymExpr σ) : SymExpr τ → SymExpr τ
   | .expr (.var y) =>
       if x = y then
         if h : σ = τ then
@@ -253,45 +262,135 @@ def subst {σ τ : Ty} (x : String) (v : SymExpr σ) : SymExpr τ → SymExpr τ
           .expr (.var y)
       else
         .expr (.var y)
+
   | .expr e =>
       .expr (TExpr.subst x (erase v) e)
+
+  | .sym y =>
+      .sym y
+
   | .value e =>
-      .value (subst x v e)
+      .value (substVar x v e)
+
   | .pair e1 e2 =>
-      .pair (subst x v e1) (subst x v e2)
+      .pair (substVar x v e1) (substVar x v e2)
+
   | .letE y e1 e2 =>
       if x = y then
-        .letE y (subst x v e1) e2
+        .letE y (substVar x v e1) e2
       else
-        .letE y (subst x v e1) (subst x v e2)
+        .letE y (substVar x v e1) (substVar x v e2)
+
   | .lt e1 e2 h1 h2 =>
-      .lt (subst x v e1) (subst x v e2) h1 h2
+      .lt (substVar x v e1) (substVar x v e2) h1 h2
+
   | .add e1 e2 h1 h2 =>
-      .add (subst x v e1) (subst x v e2) h1 h2
+      .add (substVar x v e1) (substVar x v e2) h1 h2
+
   | .mulG e1 e2 h1 h2 =>
-      .mulG (subst x v e1) (subst x v e2) h1 h2
+      .mulG (substVar x v e1) (substVar x v e2) h1 h2
+
   | .mulConstL c e h1 h2 =>
-      .mulConstL c (subst x v e) h1 h2
+      .mulConstL c (substVar x v e) h1 h2
+
   | .mulConstR e c h1 h2 =>
-      .mulConstR (subst x v e) c h1 h2
+      .mulConstR (substVar x v e) c h1 h2
+
   | .div e1 e2 h1 h2 =>
-      .div (subst x v e1) (subst x v e2) h1 h2
+      .div (substVar x v e1) (substVar x v e2) h1 h2
+
   | .ifE c t f =>
-      .ifE (subst x v c) (subst x v t) (subst x v f)
+      .ifE (substVar x v c) (substVar x v t) (substVar x v f)
+
   | .uniform e1 e2 h1 h2 =>
-      .uniform (subst x v e1) (subst x v e2) h1 h2
+      .uniform (substVar x v e1) (substVar x v e2) h1 h2
+
   | .gaussian e1 e2 h1 h2 =>
-      .gaussian (subst x v e1) (subst x v e2) h1 h2
+      .gaussian (substVar x v e1) (substVar x v e2) h1 h2
+
   | .poisson e h =>
-      .poisson (subst x v e) h
+      .poisson (substVar x v e) h
+
   | .exponential e h =>
-      .exponential (subst x v e) h
+      .exponential (substVar x v e) h
+
   | .beta e1 e2 h1 h2 =>
-      .beta (subst x v e1) (subst x v e2) h1 h2
+      .beta (substVar x v e1) (substVar x v e2) h1 h2
+
   | .gamma e1 e2 h1 h2 =>
-      .gamma (subst x v e1) (subst x v e2) h1 h2
+      .gamma (substVar x v e1) (substVar x v e2) h1 h2
+
   | .subsume e h =>
-      .subsume (subst x v e) h
+      .subsume (substVar x v e) h
+
+
+/-- Symbolic-atom substitution.
+
+This is used by `actualWithSigma` and `expectedWithSigma`.
+It replaces `.sym x`, but it does not touch source variables `.expr (.var x)`.
+-/
+def substSym {τ : Ty} (x : String) (v : TExpr (.float .E)) :
+    SymExpr τ → SymExpr τ
+  | .expr e =>
+      .expr e
+
+  | .sym y =>
+      if x = y then
+        ofTExpr v
+      else
+        .sym y
+
+  | .value e =>
+      .value (substSym x v e)
+
+  | .pair e1 e2 =>
+      .pair (substSym x v e1) (substSym x v e2)
+
+  | .letE y e1 e2 =>
+      .letE y (substSym x v e1) (substSym x v e2)
+
+  | .lt e1 e2 h1 h2 =>
+      .lt (substSym x v e1) (substSym x v e2) h1 h2
+
+  | .add e1 e2 h1 h2 =>
+      .add (substSym x v e1) (substSym x v e2) h1 h2
+
+  | .mulG e1 e2 h1 h2 =>
+      .mulG (substSym x v e1) (substSym x v e2) h1 h2
+
+  | .mulConstL c e h1 h2 =>
+      .mulConstL c (substSym x v e) h1 h2
+
+  | .mulConstR e c h1 h2 =>
+      .mulConstR (substSym x v e) c h1 h2
+
+  | .div e1 e2 h1 h2 =>
+      .div (substSym x v e1) (substSym x v e2) h1 h2
+
+  | .ifE c t f =>
+      .ifE (substSym x v c) (substSym x v t) (substSym x v f)
+
+  | .uniform e1 e2 h1 h2 =>
+      .uniform (substSym x v e1) (substSym x v e2) h1 h2
+
+  | .gaussian e1 e2 h1 h2 =>
+      .gaussian (substSym x v e1) (substSym x v e2) h1 h2
+
+  | .poisson e h =>
+      .poisson (substSym x v e) h
+
+  | .exponential e h =>
+      .exponential (substSym x v e) h
+
+  | .beta e1 e2 h1 h2 =>
+      .beta (substSym x v e1) (substSym x v e2) h1 h2
+
+  | .gamma e1 e2 h1 h2 =>
+      .gamma (substSym x v e1) (substSym x v e2) h1 h2
+
+  | .subsume e h =>
+      .subsume (substSym x v e) h
+
 
 end SymExpr
 
@@ -358,6 +457,8 @@ the remaining environment and residual expression. -/
 noncomputable def actualExpr : {τ : Ty} → SymExpr τ → Dist (TExpr τ)
   | _, .expr e =>
       Dist.ret e
+  | _, .sym x =>
+      Dist.ret (.var x)
   | _, .value e =>
       Dist.bind (actualExpr e) step
   | _, .pair e1 e2 =>
@@ -429,7 +530,7 @@ noncomputable def actualWithSigma {τ : Ty} :
       Dist.bind sample.random.sample fun v =>
         actualWithSigma
           (rest.map (SymSample.subst sample.name v))
-          (SymExpr.subst sample.name (SymExpr.ofTExpr v) residual)
+          (SymExpr.substSym sample.name v residual)
 termination_by sigma _ => sigma.length
 decreasing_by simp
 
@@ -453,7 +554,7 @@ noncomputable def expectedWithSigma {τ : Ty} :
       let mean := sample.random.mean
       expectedWithSigma
         (rest.map (SymSample.subst sample.name mean))
-        (SymExpr.subst sample.name (SymExpr.ofTExpr mean) residual)
+        (SymExpr.substSym sample.name mean residual)
 termination_by sigma _ => sigma.length
 decreasing_by simp
 
@@ -467,10 +568,10 @@ This returns an ordinary expression distribution for the determinized program. -
 noncomputable def expected {τ : Ty} (μ : Dist (SymState τ)) : Dist (TExpr τ) :=
   Dist.bind μ expectedState
 
-/-- Symbolic float values: constants, symbolic variables, and arithmetic over them. -/
+/-- Float expressions that can be treated as values without symbolic atoms. -/
 def isSymFloat : {m : Mode} → TExpr (.float m) → Bool
   | _, .var _ =>
-      true
+      false
   | _, .const _ =>
       true
   | _, .add e1 e2 _ _ =>
@@ -489,10 +590,10 @@ def isSymFloat : {m : Mode} → TExpr (.float m) → Bool
   | _, _ =>
       false
 
-/-- Values for symbolic stepping; unlike concrete stepping, variables are values. -/
+/-- Values for plain expressions inside symbolic stepping. Source variables are not values. -/
 def isSymValue : {τ : Ty} → TExpr τ → Bool
   | _, .var _ =>
-      true
+      false
   | _, .subsume e _ =>
       isSymValue e
   | .unit, e =>
@@ -511,7 +612,7 @@ namespace SymExpr
 def isValue : {τ : Ty} → SymExpr τ → Bool
   | _, .value _ =>
       true
-  | _, .expr (.var _) =>
+  | _, .sym _ =>
       true
   | _, .expr .unitE =>
       true
@@ -547,7 +648,7 @@ noncomputable def finishFloat {m : Mode} (next : Nat)
   match m with
   | .E =>
       let x := freshName next
-      Dist.ret { samples := [{ name := x, random := r }], residual := .expr (.var x) }
+      Dist.ret { samples := [{ name := x, random := r }], residual := .sym x }
   | .G =>
       Dist.bind r.sample (fun e => Dist.ret (SymOut.ret e))
 
@@ -562,6 +663,8 @@ u0 + 2 + 5 → (value (u0 + 2)) + 5 → value ((value (u0 + 2)) + 5) -/
 noncomputable def symbolicStepSym (next : Nat) : {τ : Ty} → SymExpr τ → Dist (SymOut τ)
   | _, .expr e =>
       Dist.ret (SymOut.ret e)
+  | _, .sym x =>
+      Dist.ret (SymOut.keep (.sym x))
   | _, .value e =>
       Dist.ret (SymOut.keep (.value e))
   | _, .pair e1 e2 =>
@@ -574,7 +677,7 @@ noncomputable def symbolicStepSym (next : Nat) : {τ : Ty} → SymExpr τ → Di
         mapOut (symbolicStepSym next e1) (fun g => .pair g e2)
   | _, .letE x e1 e2 =>
       if e1.isValue then
-        Dist.ret (SymOut.keep (SymExpr.subst x e1 e2))
+        Dist.ret (SymOut.keep (SymExpr.substVar x e1 e2))
       else
         mapOut (symbolicStepSym next e1) (fun g => .letE x g e2)
   | _, .ifE c t f =>
@@ -742,6 +845,9 @@ lemma symbolic_step_well_defined {τ : Ty} (st : SymState τ) :
     ∃ μ : Dist (SymState τ), SymbolicStep st μ := by
   exact ⟨symbolicStep st, SymbolicStep.eval st⟩
 
+------------------------------
+--- Examples ---
+------------------------------
 /-- A value state is unchanged by one symbolic step. -/
 example :
     symbolicStep (symbolicInitial (.const (m := .E) (3 : ℝ))) =
@@ -772,7 +878,7 @@ example :
                   (.const (m := .E) (1 : ℝ))
                   (ModeLE.refl .E)
                   (ModeLE.refl .E) }],
-           residual := .expr (.var (freshName 0)) } :
+           residual := .sym (freshName 0) } :
           SymState (.float .E)) :=
   by
     simp [symbolicStep, symbolicInitial, symbolicStepExpr, symbolicStepSym,
@@ -792,13 +898,13 @@ example :
             (ModeLE.refl .E)) }
     symbolicStep
         ({ sigma := [u0],
-           residual := .expr
-            (.uniform
+           residual :=
+            .uniform
               (m := .E)
-              (.var "u0")
-              (.const (m := .E) (2 : ℝ))
+              (.sym "u0")
+              (.expr (.const (m := .E) (2 : ℝ)))
               (ModeLE.refl .E)
-              (ModeLE.refl .E)) } :
+              (ModeLE.refl .E) } :
           SymState (.float .E)) =
       Dist.ret
         ({ sigma :=
@@ -810,16 +916,16 @@ example :
                   (.const (m := .E) (2 : ℝ))
                   (ModeLE.refl .E)
                   (ModeLE.refl .E) }],
-           residual := .expr (.var (freshName 1)) } :
+           residual := .sym (freshName 1) } :
           SymState (.float .E)) :=
   by
-    simp [symbolicStep, symbolicStepExpr, symbolicStepSym, SymExpr.ofTExpr,
-      SymExpr.erase, SymExpr.isValue, finishFloat, Dist.ret, Dist.bind]
+    simp [symbolicStep, symbolicStepSym, SymExpr.erase, SymExpr.isValue,
+      finishFloat, Dist.ret, Dist.bind]
     rw [Measure.dirac_bind (by fun_prop)]
 
 /-- Nested symbolic arithmetic is marked locally, not only at the residual root. -/
 example :
-    let u : SymExpr (.float .E) := .expr (.var "u0")
+    let u : SymExpr (.float .E) := .sym "u0"
     let two : SymExpr (.float .E) := .expr (.const (m := .E) (2 : ℝ))
     let five : SymExpr (.float .E) := .expr (.const (m := .E) (5 : ℝ))
     let inner : SymExpr (.float .E) :=
