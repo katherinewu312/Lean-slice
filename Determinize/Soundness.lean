@@ -75,7 +75,7 @@ theorem actual_symbolicNstep_eq_nstep {τ : Ty} (n : ℕ) (e : TExpr τ) :
   induction n with
   | zero =>
       rw [symbolicNstep, nstep]
-      unfold actual symbolicInitial actualState actualWithSigma Dist.ret Dist.bind
+      unfold actual symbolicInitial actualState actualWithSigma actualExpr Dist.ret Dist.bind
       rw [Measure.dirac_bind (by fun_prop)]
   | succ n ih =>
       rw [actual_symbolicNstep_succ, ih, nstep]
